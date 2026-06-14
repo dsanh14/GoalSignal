@@ -1,0 +1,45 @@
+# D1 native (internal-data) feature configuration.
+#
+# All windows, decay rates, and policies are configurable here — never
+# hard-coded in model logic. "Native" = derived only from the canonical match
+# table + the leakage-free pre-match Elo timeline (no external source).
+
+feature_version: "d1.1"
+
+# Same-day policy: matches on the SAME calendar date as the target are ordered
+# by source_row; a team's rolling features use only its matches strictly
+# before the target's (date, source_row) — never a same-day-or-later match.
+same_day_policy: "strict_before_by_date_then_source_row"
+
+recent_form:
+  # Count-based windows (last N matches).
+  match_windows: [3, 5, 10]
+  # Time-based windows in days.
+  day_windows: [365]
+  # Exponential time decay half-life (days) for recency-weighted aggregates.
+  decay_half_life_days: 365
+  min_matches_for_form: 1   # availability indicator set when below this
+
+rest:
+  congestion_windows_days: [7, 14, 30]
+  long_inactivity_days: 365     # indicator: gap exceeds this
+  clip_days_since_prev: 1825    # clip absurd gaps (5y) for the numeric feature
+
+attack_defense:
+  # Opponent-adjusted expectation is a FIXED, documented mapping of pre-match
+  # Elo (no fitting, no fold dependence, no leakage). See docs.
+  base_total_goals: 2.6   # global average total goals per match
+  split_gamma: 1.0        # strength-split exponent for goals-for vs against
+
+match_filters:
+  # Which historical matches feed each team's form. "all" uses everything;
+  # "competitive" excludes friendlies. Both are computed; the model may use
+  # either family. Friendlies are NOT assumed equal to competitive matches.
+  competitive_tournaments_exclude_substrings:
+    - friendly
+  # Shootout-decided and extra-time matches: kept in form (the recorded
+  # regulation result is used); flagged where identifiable.
+
+venue:
+  # Basic venue context uses only canonical fields (neutral, country, host).
+  host_indicator_from_country: true

@@ -1,0 +1,34 @@
+# Transfermarkt-derived player/club history (optional feature source).
+#
+# PLAYER_DATA_PATH may be a DuckDB file OR a directory of gzipped CSV tables
+# (the transfermarkt-datasets export format). Opened READ-ONLY; source files
+# are never mutated. Do not scrape Transfermarkt.
+
+enabled: false
+path_env: PLAYER_DATA_PATH
+
+license: >
+  Transfermarkt-derived; non-commercial research use. Verify Transfermarkt
+  terms before redistribution. Do not scrape.
+attribution: "Data derived from Transfermarkt (transfermarkt-datasets)"
+
+position_groups:
+  - goalkeeper
+  - defence
+  - midfield
+  - attack
+  - bench
+
+# CURRENT-STATE fields on the players table that are unsafe to apply to
+# historical matches (they reflect "now", not the match date). Documented in
+# docs/player_temporal_semantics.md and the temporal-field audit report.
+current_state_unsafe_fields:
+  - current_club_id
+  - current_club_name
+  - current_national_team_id
+  - international_caps
+  - international_goals
+  - market_value_in_eur
+  - highest_market_value_in_eur
+  - last_season
+  - contract_expiration_date

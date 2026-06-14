@@ -1,0 +1,36 @@
+# D1 historical-FIFA feature configuration.
+#
+# Uses the normalized FIFA ranking timeline (ranking_fifa_historical.csv,
+# ingested separately). Leakage-safe as-of join: for a fixture at time T, use
+# the latest release strictly before T. Coverage ends 2024-09-19.
+
+feature_version: "d1.1"
+
+as_of:
+  # A release is eligible only if released strictly before the fixture date
+  # (documented same-day policy: a ranking published on match day may post-date
+  # kickoff, so it is excluded).
+  strictly_before: true
+
+staleness:
+  # A FIFA value is "stale" if the chosen release is older than this many days
+  # at the fixture date. Stale values remain available but are flagged so the
+  # model/evaluation can down-weight or exclude them.
+  stale_after_days: 400
+  # Beyond coverage end, no release exists after this date; matches later than
+  # (coverage_end + max_forward_fill_days) get fifa_available = False rather
+  # than reusing the final 2024 release. Set to 0 to never forward-fill past
+  # the last release age limit; here we mark stale via stale_after_days and
+  # additionally hard-cap availability.
+  coverage_end: "2024-09-19"
+  # Hard availability cap: if the nearest prior release is older than this,
+  # FIFA is marked UNAVAILABLE (not just stale). Set to 450 so that NO 2026
+  # match (earliest is ~471 days after the final 2024-09-19 release) can reuse
+  # a 2024 value — the documented "no 2024->2026 forward-fill" rule. Late-2025
+  # matches in the 400-450 day band remain available-but-stale.
+  unavailable_after_days: 450
+
+momentum:
+  # Points/rank change features compare the as-of release to the team's
+  # PREVIOUS releases (1 and 3 releases earlier) — never a future release.
+  release_lags: [1, 3]

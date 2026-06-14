@@ -1,0 +1,23 @@
+# StatsBomb open-data configuration (optional historical enrichment).
+#
+# Offline only. Point STATSBOMB_DATA_PATH at a local clone of
+# https://github.com/statsbomb/open-data . The `statsbombpy` package is an
+# optional dependency (install with `uv sync --extra statsbomb`).
+
+enabled: false
+data_path_env: STATSBOMB_DATA_PATH
+optional_dependency: statsbombpy
+
+license: "StatsBomb Open Data License (non-commercial; attribution required)"
+attribution: "Data provided by StatsBomb — https://github.com/statsbomb/open-data"
+
+# Competitions to consider for linking, filled in Milestone B from the local
+# competitions.json. Left empty here so nothing is fabricated: actual coverage
+# (which years/competitions of senior men's internationals exist) is unknown
+# until the local data is enumerated.
+competitions: []
+
+# Time windows for leakage-safe event features (matches and days). Only matches
+# strictly before the prediction cutoff may enter any window.
+feature_windows_matches: [3, 5, 10]
+feature_windows_days: [180, 365]

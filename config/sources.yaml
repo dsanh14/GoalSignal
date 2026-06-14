@@ -1,0 +1,54 @@
+# Enrichment source registry.
+#
+# Lists every optional enrichment source, its role, license, attribution, and
+# the environment variable that activates it. All sources are disabled by
+# default; the base CPU forecasting workflow runs without any of them.
+#
+# Credentials and local data paths are NEVER stored here. They are read from
+# environment variables (see .env.example) so secrets stay out of the repo.
+
+sources:
+  - name: statsbomb
+    role: event_enrichment
+    enabled: false
+    license: "StatsBomb Open Data License (non-commercial; attribution required)"
+    attribution: "Data provided by StatsBomb — https://github.com/statsbomb/open-data"
+    path_env: STATSBOMB_DATA_PATH
+    notes: >
+      Optional historical event-level data (xG, shots, lineups, cards). Offline
+      only: clone the open-data repo locally. Coverage of senior men's
+      internationals is sparse; missing coverage is not a team signal.
+
+  - name: api_football
+    role: live_fixtures
+    enabled: false
+    license: "API-Sports / API-Football Terms of Service (per-plan)"
+    attribution: "Live data from API-Sports (api-football.com)"
+    credential_env: FOOTBALL_DATA_API_KEY
+    notes: >
+      Vendor API-Sports, v3 (https://v3.football.api-sports.io, header
+      x-apisports-key). Live fixtures, kickoff times, standings, teams, squads,
+      confirmed lineups, fixture events/statistics, player match stats, and an
+      injuries endpoint. Free plan: 100 requests/day. World Cup coverage and
+      free-plan availability of injuries/player-stats are MEASURED, not assumed.
+      Provider predictions are stored only as an external benchmark.
+
+  - name: fifa_rankings
+    role: ranking
+    enabled: false
+    license: "User-provided; verify FIFA terms before redistribution"
+    attribution: "FIFA/Coca-Cola World Ranking"
+    path_env: FIFA_RANKINGS_PATH
+    notes: >
+      Historical FIFA ranking snapshots as a local CSV. Used as an external
+      strength baseline and Elo-disagreement signal via a date-aware as-of join.
+
+  - name: players
+    role: player_identity
+    enabled: false
+    license: "Depends on the underlying player-data provider"
+    attribution: "Per provider"
+    path_env: PLAYER_DATA_PATH
+    notes: >
+      Optional player/squad/availability data. Players are resolved to canonical
+      identities using multiple identifiers; name-only matches are never merged.

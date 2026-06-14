@@ -1,0 +1,41 @@
+# API-Sports / API-Football v3 configuration (optional live source).
+#
+# Vendor: API-Sports. Direct access (NOT RapidAPI). The key is read from
+# $FOOTBALL_DATA_API_KEY (an API-Sports key despite the historical env-var
+# name) and sent in the x-apisports-key header — only ever to base_url's host.
+# It is never stored here. No network call is made until a sync/probe command.
+#
+# NOTE: this replaces the earlier (incorrect) football-data.org integration.
+
+enabled: false
+provider: "api-football"
+vendor: "API-Sports"
+base_url: "https://v3.football.api-sports.io"
+auth_header: "x-apisports-key"
+credential_env: FOOTBALL_DATA_API_KEY
+
+# Free plan: 100 requests/day (per the user's dashboard). Reserve some for
+# manual debugging, and throttle per minute. Cache-first avoids duplicate calls.
+daily_request_limit: 100
+daily_request_reserve: 10
+max_requests_per_minute: 8
+cache_first: true
+
+retry:
+  max_retries: 3
+  backoff_seconds: 1.0
+  timeout_seconds: 20.0
+
+# Raw responses cache here (immutable, content-addressed snapshots).
+cache_dir: "data/external/api_football"
+
+# 2026 World Cup identifier — DISCOVERED via /leagues (search="World Cup"),
+# not guessed. league_id=1 is API-Football's "World Cup" (country "World",
+# type "Cup"); the 2026 season is present in its seasons list.
+world_cup:
+  league_id: 1
+  season: 2026
+  name: "World Cup"
+  country: "World"
+  discovered_at: "2026-06-13"
+  source_snapshot_id: "899dfe4ba0ba3aaa"

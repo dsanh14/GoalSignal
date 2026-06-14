@@ -1,0 +1,54 @@
+# Elo rating configuration.
+#
+# Ratings are computed strictly chronologically; each match's update uses only
+# the pre-match ratings, so the timeline is leakage-free by construction.
+
+initial_rating: 1500.0
+scale: 400.0
+k_factor: 20.0
+
+# Elo points added to the home team's rating when the venue is not neutral.
+home_advantage: 60.0
+
+# K multipliers by match importance, matched by case-insensitive substring on
+# the tournament name; first match wins, fallback is `default`. Patterns are
+# checked in order, so put the most specific first.
+importance:
+  - pattern: "fifa world cup qualification"
+    multiplier: 1.25
+  - pattern: "fifa world cup"
+    multiplier: 2.0
+  - pattern: "qualification"
+    multiplier: 1.25
+  - pattern: "friendly"
+    multiplier: 0.5
+  - pattern: "uefa euro"
+    multiplier: 1.5
+  - pattern: "copa américa"
+    multiplier: 1.5
+  - pattern: "africa cup of nations"
+    multiplier: 1.5
+  - pattern: "african cup of nations"
+    multiplier: 1.5
+  - pattern: "afc asian cup"
+    multiplier: 1.5
+  - pattern: "gold cup"
+    multiplier: 1.5
+  - pattern: "confederations cup"
+    multiplier: 1.5
+default_importance: 1.0
+
+# Goal-difference multiplier (eloratings.net convention):
+# gd <= 1 -> 1.0, gd == 2 -> 1.5, gd >= 3 -> (11 + gd) / 8.
+goal_difference_multiplier: eloratings
+
+# How shootout matches contribute to ratings.
+#   draw            — regulation outcome (a draw) is used; shootout ignored.
+#   winner_partial  — shootout winner gets partial credit `shootout_credit`
+#                     above 0.5 (e.g. 0.25 -> S = 0.75 / 0.25).
+shootout_policy: draw
+shootout_credit: 0.25
+
+# The 37 source matches where a shootout joins a non-tied recorded score have
+# unknown regulation outcome; fall back to the recorded-score outcome.
+unknown_regulation_outcome_fallback: recorded_score

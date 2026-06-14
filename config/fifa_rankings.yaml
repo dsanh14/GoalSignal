@@ -1,0 +1,32 @@
+# Historical FIFA rankings configuration (optional feature source).
+#
+# TWO separate user-provided files, with distinct roles:
+#   FIFA_RANKINGS_PATH   -> historical ranking timeline (ranking_fifa_historical.csv)
+#   FIFA_WC_TEAMS_PATH   -> World Cup pre-tournament rank validation (wc_teams.csv)
+# Do not overload one variable for both.
+#
+# The user supplies the data and is responsible for verifying FIFA's terms
+# before redistribution.
+
+enabled: false
+path_env: FIFA_RANKINGS_PATH
+wc_teams_path_env: FIFA_WC_TEAMS_PATH
+
+license: "User-provided; verify FIFA terms before redistribution"
+attribution: "FIFA/Coca-Cola World Ranking"
+
+# Real schema of ranking_fifa_historical.csv (validated, not assumed):
+#   team, total_points, date, id, id_num, team_short
+# `date` is the release date; rank is RECONSTRUCTED by sorting total_points
+# descending within each release (the file has no per-team rank column).
+expected_columns:
+  - team
+  - total_points
+  - date
+
+# Real schema of wc_teams.csv: year, team, confederation, rank
+wc_teams_expected_columns:
+  - year
+  - team
+  - confederation
+  - rank

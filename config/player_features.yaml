@@ -1,0 +1,22 @@
+# Player-strength feature configuration (optional).
+#
+# Player/squad data is user-provided at $PLAYER_DATA_PATH. Player strength is a
+# transparent, position-aware proxy built from recent minutes/starts/goals and
+# international experience — never a blind sum of transfer values.
+
+enabled: false
+path_env: PLAYER_DATA_PATH
+
+# Position groups for position-aware aggregation (never summed blindly).
+position_groups:
+  - goalkeeper
+  - defence
+  - midfield
+  - attack
+  - bench
+
+recent_minutes_window_days: 90
+
+# Strength-component weights, tuned only on training folds in Milestone D.
+# Empty here so nothing is fabricated before the ablation experiments.
+strength_weights: {}

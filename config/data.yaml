@@ -1,0 +1,71 @@
+# Data layer configuration for GoalSignal.
+#
+# The user-provided historical dataset lives in `Datasets/` at the repository
+# root. The files are treated as read-only inputs; GoalSignal never modifies,
+# moves, or re-downloads them. Any directory can be supplied at the CLI with
+# `--input-dir`.
+
+input:
+  # Directory containing results.csv, shootouts.csv, goalscorers.csv,
+  # former_names.csv. Relative paths are resolved against the repository root.
+  directory: Datasets
+
+  files:
+    results: results.csv
+    shootouts: shootouts.csv
+    goalscorers: goalscorers.csv
+    former_names: former_names.csv
+
+output:
+  processed_dir: data/processed
+  reports_dir: artifacts/reports
+  manifests_dir: artifacts/manifests
+
+schema_version: 1
+
+validation:
+  # Scores at or above this value are flagged for review (not excluded).
+  # The historical maximum in international football is 31 (Australia 31-0
+  # American Samoa, 2001), so anything above it is presumed to be an error.
+  implausible_score_threshold: 32
+
+  # Tournament name substrings that indicate a match may violate the
+  # "senior men's full internationals only" scope. Matches are flagged in
+  # artifacts/reports/suspicious_scope_matches.csv, never silently dropped.
+  suspicious_tournament_terms:
+    - olympic
+    - u-23
+    - u23
+    - under-23
+    - youth
+    - b team
+    - reserve
+    - select
+
+score_scope_policy:
+  # The source records full-time scores that include extra time but exclude
+  # penalty shootouts. Extra-time play is identifiable only when a shootout
+  # row exists (the match must have been tied). Decisive knockout matches
+  # settled in extra time cannot be distinguished from 90-minute results in
+  # this source; they are flagged as an upper bound in the suspicious-scope
+  # report rather than guessed at.
+  #
+  # Tournament names matching these substrings may include knockout stages
+  # with extra time; decisive results in them are flagged (not excluded) in
+  # suspicious_scope_matches.csv as an upper bound on extra-time-inclusive
+  # scores. Qualification competitions are deliberately omitted: their rare
+  # two-legged play-off extra-time cases cannot be separated from tens of
+  # thousands of ordinary group matches, which would make the audit useless.
+  # This is a documented limitation, not an assumption of purity.
+  knockout_capable_tournament_patterns:
+    - FIFA World Cup
+    - UEFA Euro
+    - Copa América
+    - African Cup of Nations
+    - Africa Cup of Nations
+    - AFC Asian Cup
+    - CONCACAF Championship
+    - Gold Cup
+    - Confederations Cup
+    - Nations League
+    - Oceania Nations Cup

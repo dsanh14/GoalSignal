@@ -1,0 +1,66 @@
+[project]
+name = "goalsignal"
+version = "0.1.0"
+description = "GoalSignal: a leakage-safe probabilistic forecasting and tournament simulation system for international football"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "Diego Sanchez" }]
+dependencies = [
+    "numpy>=1.26",
+    "pandas>=2.2",
+    "pydantic>=2.7",
+    "pyyaml>=6.0",
+    "scipy>=1.17.1",
+    "typer>=0.12",
+]
+
+[project.optional-dependencies]
+# Heavy/source-specific enrichment dependencies. Never required by the base
+# CPU forecasting workflow; install only when ingesting a given source.
+http = ["httpx>=0.27"]            # football-data.org API client (Milestone B)
+statsbomb = ["statsbombpy>=1.11"] # StatsBomb open-data convenience loader
+enrichment = ["httpx>=0.27", "statsbombpy>=1.11"]
+
+[project.scripts]
+goalsignal = "goalsignal.cli:app"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/goalsignal"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "RUF"]
+ignore = [
+    "SIM108", # ternary not always clearer
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q -m 'not live_api'"
+markers = [
+    "live_api: hits the real football-data.org API; skipped unless explicitly selected",
+]
+
+# link-mode=copy: APFS clonefile preserves the macOS UF_HIDDEN flag from uv's
+# cache, and CPython 3.12+ silently skips hidden .pth files, breaking the
+# editable install. Plain copies drop the flag. A background process on this
+# machine re-hides .pth files, so prefer UV_NO_EDITABLE=1 (non-editable
+# installs need no .pth); cache-keys makes uv rebuild on source changes.
+[tool.uv]
+link-mode = "copy"
+cache-keys = [{ file = "pyproject.toml" }, { file = "src/**/*.py" }]

@@ -1,0 +1,57 @@
+# D1 ablation experiment configuration.
+#
+# Challenger = the existing MultinomialLogistic outcome model extended with
+# configurable feature columns, fit per fold with fold-local standardization
+# and temperature calibration (mirrors the deployed backtest protocol). The
+# deployed ensemble-v1 champion is NOT modified.
+
+feature_version: "d1.1"
+
+backtest:
+  start_year: 2010
+  end_year: 2023        # FIFA coverage ends 2024-09-19; keep test folds in-coverage
+  val_years: 3          # validation/calibration window before each test year
+  seed: 20260613
+
+bootstrap:
+  n_resamples: 1000
+  level: 0.90
+  seed: 7
+
+# Baseline feature columns (the deployed multinomial-logistic inputs).
+baseline_features:
+  - elo_diff
+  - abs_elo_diff
+  - home_adv
+
+# Continuous columns get fold-local median imputation + standardization;
+# *_available / *_disagree / is_* / *_inactivity / host_indicator are treated
+# as 0/1 indicators (NaN -> 0), never scaled.
+feature_groups:
+  fifa: [fifa_points_diff, fifa_rank_diff, fifa_release_age_days, fifa_available]
+  disagreement: [fifa_points_diff, favorite_disagree, abs_elo_fifa_disagreement,
+                 fifa_available]
+  form: [home_ppm_last5, away_ppm_last5, home_ppm_last10, away_ppm_last10,
+         home_gd_per_match_last10, away_gd_per_match_last10,
+         home_winrate_last10, away_winrate_last10,
+         home_form_available, away_form_available]
+  attack_defense: [home_attack_resid_last10, away_attack_resid_last10,
+                   home_defense_resid_last10, away_defense_resid_last10,
+                   home_opp_adj_points_last10, away_opp_adj_points_last10]
+  rest: [rest_days_diff, home_matches_prev_14d, away_matches_prev_14d,
+         home_long_inactivity, away_long_inactivity]
+  venue: [is_neutral, home_at_home_country, away_at_home_country, host_indicator]
+
+experiments:
+  D1-0: []                       # baseline only
+  D1-A: [fifa]
+  D1-B: [disagreement]
+  D1-C: [form]
+  D1-D: [attack_defense]
+  D1-E: [rest]
+  D1-F: [venue]
+  D1-G: [fifa, disagreement, form, attack_defense, rest, venue]
+  "D1-fifa+disagreement": [fifa, disagreement]
+  "D1-form+attackdef": [form, attack_defense]
+  "D1-rest+venue": [rest, venue]
+  "D1-native-noFIFA": [form, attack_defense, rest, venue]

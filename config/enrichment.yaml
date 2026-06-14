@@ -1,0 +1,29 @@
+# Top-level enrichment switch and feature-family registry.
+#
+# Enrichment is OFF by default: the deployed ensemble-v1 baseline is unchanged
+# and remains the champion. Each feature family is evaluated one at a time
+# through chronological ablation (Milestone F) before any challenger is even
+# considered for promotion (Milestone G). No auto-promotion.
+
+enabled: false
+feature_set_version: 1
+
+# Feature families, each ablated independently against the baseline.
+feature_families:
+  - fifa_rankings
+  - rest_workload
+  - travel_venue
+  - player_strength
+  - expected_lineup
+  - confirmed_lineup
+  - injuries_suspensions   # API-Football has an injuries endpoint; WC/free-plan coverage measured
+  - statsbomb_events
+
+# Missingness indicators. Missing enrichment is flagged explicitly, never
+# encoded as zero; imputers are fit on training folds only.
+missingness_indicators:
+  - statsbomb_available
+  - lineup_available
+  - injury_feed_available
+  - fifa_ranking_available
+  - player_strength_available
