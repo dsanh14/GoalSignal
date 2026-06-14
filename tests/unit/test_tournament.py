@@ -16,6 +16,7 @@ from goalsignal.tournament.simulator import (
     check_invariants,
     simulate_groups,
     simulate_groups_fast,
+    validate_completed_overlay,
 )
 
 TEAMS = ["Atlantis", "Freedonia", "Ruritania", "Sylvania"]
@@ -150,6 +151,22 @@ def test_played_fixtures_are_respected():
     )
     res = simulate_groups(groups, fixtures, FixedModel(), n_sims=500, seed=3)
     assert res.expected_points["T1b"] > res.expected_points["T1a"]
+
+
+def test_completed_overlay_is_exactly_once():
+    _groups, fixtures = _twelve_groups()
+    fixtures[0].fixture_id = "done"
+    fixtures[0].played = True
+    fixtures[0].home_goals = 2
+    fixtures[0].away_goals = 0
+    active = {"done": {"regulation_home_goals": 2, "regulation_away_goals": 0}}
+    validate_completed_overlay(fixtures, active)
+    fixtures[1].fixture_id = "done"
+    fixtures[1].played = True
+    fixtures[1].home_goals = 2
+    fixtures[1].away_goals = 0
+    with pytest.raises(ValueError, match="overlay mismatch"):
+        validate_completed_overlay(fixtures, active)
 
 
 def test_knockout_resolution_stages():

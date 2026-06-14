@@ -1,5 +1,9 @@
 # Historical FIFA Rankings
 
+This historical timeline is distinct from the frozen current World Cup
+snapshot in `docs/current_fifa_snapshot.md`. Never append that 48-team snapshot
+to the historical series.
+
 Optional external strength baseline and Elo-disagreement signal.
 
 ## Two separate files

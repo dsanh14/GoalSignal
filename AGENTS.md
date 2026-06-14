@@ -19,7 +19,10 @@ Dixon-Coles goal models, calibration, ensemble, Monte Carlo group-stage
 simulation of the real 2026 fixtures, and a hash-chained prediction ledger
 holding 70 immutable World Cup forecasts. 55 tests pass; ruff clean.
 
-**Not complete:** the full original roadmap. See "Open work" below. Do not
+**Not complete:** the full original roadmap. The live-update milestone now
+includes a separate current-FIFA snapshot, six active results, frozen forecast
+feedback, online Elo audit, future-only revisions, and result-aware versioned
+group simulation. See "Open work" below. Do not
 describe the project as finished.
 
 ### Original roadmap → implemented milestone mapping
@@ -316,7 +319,7 @@ venue features and evaluated them via chronological ablation. **Deployed
 
 ## Conventions
 
-- Python 3.12, uv-managed. Ruff (line length 100); pytest; **97 tests** must pass
+- Python 3.12, uv-managed. Ruff (line length 100); pytest; **166 tests** must pass
   and lint must be clean before finishing any change.
 - Paths resolve against the repo root (`goalsignal.utils.paths.resolve`).
 - CLI commands validate inputs, exit nonzero on failure, print artifact

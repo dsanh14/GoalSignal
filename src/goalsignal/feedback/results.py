@@ -46,6 +46,15 @@ def active_results(path: str | Path = DEFAULT_RESULTS_PATH) -> dict[str, dict]:
     return out
 
 
+def result_store_hash(path: str | Path = DEFAULT_RESULTS_PATH) -> str:
+    store = resolve(path)
+    if not store.exists():
+        return sha256_text("")
+    import hashlib
+
+    return hashlib.sha256(store.read_bytes()).hexdigest()
+
+
 def _outcome(home_goals: int, away_goals: int) -> str:
     if home_goals > away_goals:
         return "home_win"
@@ -64,6 +73,9 @@ def record_result(
     path: str | Path = DEFAULT_RESULTS_PATH,
     corrects: str | None = None,
     correction_reason: str | None = None,
+    match_date: str | None = None,
+    home_team: str | None = None,
+    away_team: str | None = None,
 ) -> dict:
     """Append one result entry; returns the stored entry.
 
@@ -94,8 +106,13 @@ def record_result(
     if corrects is not None:
         if not correction_reason:
             raise ValueError("corrections require an explicit --reason")
-        if not any(e["entry_hash"] == corrects for e in existing):
+        targets = [e for e in existing if e["entry_hash"] == corrects]
+        if not targets:
             raise ValueError(f"corrects target {corrects[:12]}… not found in store")
+        if targets[0]["payload"]["fixture_id"] != fixture_id:
+            raise ValueError("correction target belongs to a different fixture")
+        if prior[-1]["entry_hash"] != corrects:
+            raise ValueError("correction must supersede the current active result")
 
     payload = {
         "fixture_id": fixture_id,
@@ -104,9 +121,17 @@ def record_result(
         "outcome": _outcome(home_goals, away_goals),
         "completed_at": completed_at,
         "completed_at_time_known": "T" in completed_at,
+        "timestamp_precision": "datetime" if "T" in completed_at else "date",
+        "time_known": "T" in completed_at,
         "source": source,
         "recorded_at": datetime.now(UTC).isoformat(timespec="seconds"),
     }
+    if match_date is not None:
+        payload["match_date"] = match_date
+    if home_team is not None:
+        payload["home_team"] = home_team
+    if away_team is not None:
+        payload["away_team"] = away_team
     if corrects is not None:
         payload["corrects"] = corrects
         payload["correction_reason"] = correction_reason

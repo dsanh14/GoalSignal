@@ -244,6 +244,27 @@ def _live_model(config: Path, input_dir: Path | None, with_results: bool = True)
     return matches, live
 
 
+def _current_fifa(config: Path, input_dir: Path | None):
+    import os
+
+    from goalsignal.data.sources.config import (
+        FifaCurrentRankingsConfig,
+        validate_source_path,
+    )
+    from goalsignal.data.sources.fifa_current import load_current_fifa
+
+    _load_env()
+    source_cfg = FifaCurrentRankingsConfig.load()
+    raw = os.environ.get(source_cfg.path_env, "")
+    if not raw:
+        return None
+    path = validate_source_path(raw, kind="file", extensions=(".csv",))
+    cfg = _load_config(config, input_dir)
+    matches = _canonical_matches(cfg)
+    canonical = set(matches["home_team"]) | set(matches["away_team"])
+    return load_current_fifa(path, canonical)
+
+
 @tournament_app.command("simulate")
 def tournament_simulate(
     sims: Annotated[int, typer.Option(help="Number of Monte Carlo simulations.")] = 100_000,
@@ -256,14 +277,35 @@ def tournament_simulate(
     Knockout simulation beyond Round-of-32 qualification requires the official
     bracket mapping, which is not in the dataset and is never fabricated.
     """
-    import json
-
+    from goalsignal.feedback.results import active_results, result_store_hash
     from goalsignal.tournament.fixtures_2026 import derive_2026_group_stage
+    from goalsignal.tournament.live_update import (
+        result_frame,
+        simulation_version,
+        write_group_reports,
+        write_versioned_simulation,
+    )
     from goalsignal.tournament.model_adapter import RatingsGoalAdapter
-    from goalsignal.tournament.simulator import check_invariants, simulate_groups_fast
+    from goalsignal.tournament.simulator import (
+        check_invariants,
+        simulate_groups_fast,
+        validate_completed_overlay,
+    )
 
     matches, live = _live_model(config, input_dir)
     groups, fixtures = derive_2026_group_stage(matches)
+    active = active_results()
+    validate_completed_overlay(fixtures, active)
+    fifa = _current_fifa(config, input_dir)
+    snapshot_id = None
+    official_groups = {}
+    if fifa is not None:
+        fifa_df, _manifest, _quality = fifa
+        snapshot_id = fifa_df["source_snapshot_id"].iloc[0]
+        official_groups = {
+            g: list(block["canonical_team"])
+            for g, block in fifa_df.groupby("group", sort=True)
+        }
     adapter = RatingsGoalAdapter(live.ratings, live.goal_model)
     result = simulate_groups_fast(groups, fixtures, adapter, n_sims=sims, seed=seed)
 
@@ -277,44 +319,42 @@ def tournament_simulate(
 
     import pandas as pd
 
-    rows = []
-    for g, ts in result.groups.items():
-        for t in sorted(ts, key=lambda t: -result.advance_probs[t]):
-            pp = result.position_probs[t]
-            rows.append(
-                {
-                    "group": g,
-                    "team": t,
-                    "expected_points": round(result.expected_points[t], 3),
-                    "p_first": round(pp[0], 4),
-                    "p_second": round(pp[1], 4),
-                    "p_third": round(pp[2], 4),
-                    "p_fourth": round(pp[3], 4),
-                    "p_best_third_advance": round(result.best_third_probs[t], 4),
-                    "p_reach_round_of_32": round(result.advance_probs[t], 4),
-                    "mc_se_advance": round(
-                        result.mc_standard_error(result.advance_probs[t]), 5
-                    ),
-                }
-            )
-    df = pd.DataFrame(rows)
-    out = resolve("artifacts/simulations")
-    out.mkdir(parents=True, exist_ok=True)
-    df.to_csv(out / "wc2026_group_stage.csv", index=False)
+    df = result_frame(result)
+    result_hash = result_store_hash()
+    version = simulation_version(result_hash, live.model_version, snapshot_id)
+    completed = [
+        {
+            "fixture_id": f.fixture_id,
+            "home_team": f.home,
+            "away_team": f.away,
+            "home_goals": f.home_goals,
+            "away_goals": f.away_goals,
+        }
+        for f in fixtures if f.played and f.fixture_id in active
+    ]
     meta = {
         "n_sims": sims,
         "seed": seed,
         "data_cutoff": str(live.cutoff.date()),
         "dataset_version": live.dataset_version,
-        "model_version": "ensemble-v1",
+        "model_version": live.model_version,
+        "result_store_hash": result_hash,
+        "active_completed_result_count": len(active),
+        "completed_fixtures": completed,
+        "remaining_fixture_count": sum(not f.played for f in fixtures),
+        "fifa_snapshot_id": snapshot_id,
+        "simulation_version": version,
         "diagnostics": live.diagnostics,
         "groups_label_note": "group labels G01..G12 are synthetic (derived from "
         "fixture graph); official letters are not in the dataset",
         "knockout_note": "knockout bracket beyond R32 qualification requires the "
         "official bracket mapping; not fabricated",
     }
-    with open(out / "wc2026_group_stage_meta.json", "w", encoding="utf-8") as f:
-        json.dump(meta, f, indent=2)
+    out = write_versioned_simulation(df, meta, version)
+    if official_groups:
+        previous_path = resolve("artifacts/simulations/wc2026_group_stage.csv")
+        previous = pd.read_csv(previous_path) if previous_path.exists() else None
+        write_group_reports(df, official_groups, previous)
 
     typer.echo(f"Simulations: {sims} (seed {seed}); cutoff {live.cutoff.date()}")
     typer.echo(df.sort_values("p_reach_round_of_32", ascending=False)
@@ -328,7 +368,8 @@ def predict_remaining(
     input_dir: InputDirOpt = None,
 ) -> None:
     """Predict all scheduled fixtures and append them to the prediction ledger."""
-    from goalsignal.ledger.storage import DEFAULT_PATH, append_predictions
+    from goalsignal.feedback.results import active_results, result_store_hash
+    from goalsignal.ledger.storage import DEFAULT_PATH, append_predictions, list_entries
     from goalsignal.live import build_prediction_payload
 
     matches, live = _live_model(config, input_dir)
@@ -337,10 +378,32 @@ def predict_remaining(
         typer.echo("No scheduled fixtures in the dataset.")
         raise typer.Exit(code=0)
 
+    fifa = _current_fifa(config, input_dir)
+    snapshot_id = fifa[1]["snapshot_id"] if fifa else None
+    active = active_results()
+    revision = {
+        "revision": live.model_version,
+        "result_store_hash": result_store_hash(),
+        "active_result_count": len(active),
+        "elo_state_hash": __import__("goalsignal.utils.hashing", fromlist=["sha256_json"])
+        .sha256_json(live.ratings),
+        "feature_set_version": "elo-venue-v1",
+        "source_snapshot_ids": {"fifa_current": snapshot_id},
+    }
     payloads = [
-        build_prediction_payload(live, row)
+        build_prediction_payload(live, row, revision)
         for row in scheduled.itertuples(index=False)
     ]
+    seen = {
+        (e["payload"].get("fixture_id"), e["payload"].get("model_version"))
+        for e in list_entries()
+    }
+    payloads = [
+        p for p in payloads if (p["fixture_id"], p["model_version"]) not in seen
+    ]
+    if not payloads:
+        typer.echo(f"No new predictions: revision {live.model_version} is already complete.")
+        return
     entries = append_predictions(payloads)
     typer.echo(f"Appended {len(entries)} predictions to {resolve(DEFAULT_PATH)}")
     typer.echo(f"Data cutoff: {live.cutoff.date()}; model {live.model_version}; "
@@ -431,6 +494,15 @@ def predictions_scores(
         str, typer.Option("--format", help="table | csv | json")
     ] = "table",
     path: LedgerPathOpt = Path("artifacts/predictions/ledger.jsonl"),
+    latest_only: Annotated[
+        bool, typer.Option("--latest-only/--no-latest-only")
+    ] = True,
+    show_revisions: Annotated[
+        bool, typer.Option("--show-revisions", help="Show every immutable revision.")
+    ] = False,
+    model_version: Annotated[
+        str | None, typer.Option("--model-version", help="Filter exact model revision.")
+    ] = None,
 ) -> None:
     """Expected goals and exact-score forecasts for stored predictions."""
     from goalsignal.ledger.display import (
@@ -438,10 +510,15 @@ def predictions_scores(
         format_csv,
         format_json,
         format_table,
+        latest_entries,
+        model_version_entries,
     )
     from goalsignal.ledger.storage import list_entries
 
-    entries = filter_entries(list_entries(path), team=team, date=date)
+    entries = model_version_entries(list_entries(path), model_version)
+    if latest_only and not show_revisions:
+        entries = latest_entries(entries)
+    entries = filter_entries(entries, team=team, date=date)
     if not entries:
         typer.echo("No predictions match the given filters.")
         raise typer.Exit(code=1)
@@ -523,8 +600,10 @@ def benchmark(
 
 
 result_app = typer.Typer(help="Record completed-match results (separate from predictions).")
+results_app = typer.Typer(help="Verify the append-only result store.")
 feedback_app = typer.Typer(help="Score frozen predictions against recorded results.")
 app.add_typer(result_app, name="result")
+app.add_typer(results_app, name="results")
 app.add_typer(feedback_app, name="feedback")
 
 
@@ -544,8 +623,14 @@ def _persist_elo_update(cfg, fixture_id: str, result_entry_hash: str) -> dict:
     pre/post Elo update (derived, regenerable artifact)."""
     import json
 
-    from goalsignal.feedback.results import active_results, apply_results_overlay
+    from goalsignal.feedback.results import (
+        active_results,
+        apply_results_overlay,
+        list_results,
+        result_store_hash,
+    )
     from goalsignal.ratings.elo import EloConfig, compute_elo
+    from goalsignal.utils.hashing import sha256_file
 
     matches = _canonical_matches(cfg)
     overlaid, _ = apply_results_overlay(matches, active_results())
@@ -554,24 +639,43 @@ def _persist_elo_update(cfg, fixture_id: str, result_entry_hash: str) -> dict:
     if len(row) != 1:
         typer.echo("WARNING: could not locate Elo update for the recorded result", err=True)
         return {}
-    r = row.iloc[0]
-    update = {
-        "canonical_match_id": fixture_id,
-        "date": str(r["date"].date()),
-        "home_team": r["home_team"],
-        "away_team": r["away_team"],
-        "home_elo_pre": float(r["home_elo_pre"]),
-        "home_elo_post": float(r["home_elo_post"]),
-        "away_elo_pre": float(r["away_elo_pre"]),
-        "away_elo_post": float(r["away_elo_post"]),
-        "delta": float(r["delta"]),
-        "result_entry_hash": result_entry_hash,
+    entry_by_fixture = {
+        e["payload"]["fixture_id"]: e["entry_hash"] for e in list_results()
     }
+    active_ids = set(active_results())
+    updates = []
+    for order, row in enumerate(
+        timeline[timeline["canonical_match_id"].isin(active_ids)].itertuples(index=False)
+    ):
+        updates.append({
+            "canonical_match_id": row.canonical_match_id,
+            "chronological_order": order,
+            "chronological_key": [str(row.date.date()), int(
+                overlaid.loc[
+                    overlaid["canonical_match_id"] == row.canonical_match_id, "source_row"
+                ].iloc[0]
+            )],
+            "date": str(row.date.date()),
+            "home_team": row.home_team,
+            "away_team": row.away_team,
+            "home_elo_pre": float(row.home_elo_pre),
+            "home_elo_post": float(row.home_elo_post),
+            "away_elo_pre": float(row.away_elo_pre),
+            "away_elo_post": float(row.away_elo_post),
+            "expected_home": float(row.expected_home),
+            "actual_home": float(row.actual_home),
+            "delta": float(row.delta),
+            "elo_config_hash": sha256_file(resolve("config/elo.yaml")),
+            "active_result_store_hash": result_store_hash(),
+            "result_entry_hash": entry_by_fixture[row.canonical_match_id],
+        })
     out = resolve("artifacts/ratings/online_updates.jsonl")
     out.parent.mkdir(parents=True, exist_ok=True)
-    with open(out, "a", encoding="utf-8") as f:
-        f.write(json.dumps(update, sort_keys=True) + "\n")
-    return update
+    out.write_text(
+        "".join(json.dumps(u, sort_keys=True) + "\n" for u in updates),
+        encoding="utf-8",
+    )
+    return next(u for u in updates if u["canonical_match_id"] == fixture_id)
 
 
 @result_app.command("record")
@@ -589,7 +693,7 @@ def result_record(
     input_dir: InputDirOpt = None,
 ) -> None:
     """Record a completed regulation-time result in the append-only result store."""
-    from goalsignal.feedback.results import record_result, verify_results
+    from goalsignal.feedback.results import active_results, record_result, verify_results
     from goalsignal.ledger.storage import list_entries, verify_ledger
 
     cfg = _load_config(config, input_dir)
@@ -598,6 +702,20 @@ def result_record(
     fid = fixture["canonical_match_id"]
     if fixture["status"] == "played":
         typer.echo("Fixture is already played in the source dataset; refusing.", err=True)
+        raise typer.Exit(code=1)
+    existing = active_results().get(fid)
+    if existing is not None:
+        same = (
+            existing["regulation_home_goals"] == home_goals
+            and existing["regulation_away_goals"] == away_goals
+        )
+        if same:
+            typer.echo(
+                f"Already recorded: {fixture['home_team']} {home_goals}-{away_goals} "
+                f"{fixture['away_team']}; no append performed."
+            )
+            return
+        typer.echo("Conflicting active result exists; use `result correct`.", err=True)
         raise typer.Exit(code=1)
 
     has_prediction = any(
@@ -618,6 +736,9 @@ def result_record(
         completed_at=completed_at,
         source=source,
         kickoff_date=str(fixture["date"].date()),
+        match_date=str(fixture["date"].date()),
+        home_team=fixture["home_team"],
+        away_team=fixture["away_team"],
     )
     post_problems = verify_ledger()
     res_problems = verify_results()
@@ -658,7 +779,7 @@ def result_correct(
     input_dir: InputDirOpt = None,
 ) -> None:
     """Audited correction: append a superseding result referencing the old entry."""
-    from goalsignal.feedback.results import list_results, record_result
+    from goalsignal.feedback.results import list_results, record_result, verify_results
 
     cfg = _load_config(config, input_dir)
     fixture = _resolve_fixture(_canonical_matches(cfg), fixture_id)
@@ -672,9 +793,30 @@ def result_correct(
         completed_at=completed_at, source=source,
         kickoff_date=str(fixture["date"].date()),
         corrects=prior[-1]["entry_hash"], correction_reason=reason,
+        match_date=str(fixture["date"].date()),
+        home_team=fixture["home_team"], away_team=fixture["away_team"],
     )
     typer.echo(f"Correction recorded [entry {entry['entry_hash'][:12]}], "
                f"supersedes {prior[-1]['entry_hash'][:12]}.")
+    if verify_results():
+        typer.echo("Result store verification failed after correction.", err=True)
+        raise typer.Exit(code=1)
+    _persist_elo_update(cfg, fid, entry["entry_hash"])
+
+
+@results_app.command("verify")
+def results_verify() -> None:
+    from goalsignal.feedback.results import list_results, result_store_hash, verify_results
+
+    problems = verify_results()
+    if problems:
+        for problem in problems:
+            typer.echo(f"FAIL: {problem}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(
+        f"Result store intact: {len(list_results())} entries; "
+        f"sha256={result_store_hash()}"
+    )
 
 
 @feedback_app.command("match")
@@ -831,10 +973,12 @@ sources_app = typer.Typer(help="Inspect and ingest optional enrichment sources."
 apifootball_app = typer.Typer(help="API-Sports / API-Football v3 live ingestion (optional).")
 statsbomb_app = typer.Typer(help="StatsBomb open-data offline ingestion (optional).")
 fifa_app = typer.Typer(help="Historical FIFA rankings ingestion (optional).")
+fifa_current_app = typer.Typer(help="Frozen June 11, 2026 FIFA World Cup snapshot.")
 app.add_typer(sources_app, name="sources")
 app.add_typer(apifootball_app, name="api-football")
 app.add_typer(statsbomb_app, name="statsbomb")
 app.add_typer(fifa_app, name="fifa-rankings")
+app.add_typer(fifa_current_app, name="fifa-current")
 
 
 def _load_env():
@@ -1229,6 +1373,92 @@ def _canonical_team_set():
         return None
     m = pd.read_csv(proc, usecols=["home_team", "away_team"])
     return set(m["home_team"]) | set(m["away_team"])
+
+
+def _require_current_fifa():
+    import os
+
+    from goalsignal.data.sources.config import (
+        FifaCurrentRankingsConfig,
+        validate_source_path,
+    )
+
+    _load_env()
+    cfg = FifaCurrentRankingsConfig.load()
+    return validate_source_path(
+        os.environ.get(cfg.path_env, ""), kind="file", extensions=(".csv",)
+    )
+
+
+@fifa_current_app.command("inspect")
+def fifa_current_inspect() -> None:
+    from goalsignal.data.sources.config import SourcePathError
+
+    try:
+        path = _require_current_fifa()
+    except SourcePathError as exc:
+        typer.echo(f"Current FIFA snapshot not configured/invalid: {exc}")
+        raise typer.Exit(code=0) from None
+    typer.echo(f"Current FIFA snapshot: {path}")
+
+
+@fifa_current_app.command("validate")
+def fifa_current_validate(
+    config: ConfigOpt = Path("config/data.yaml"),
+    input_dir: InputDirOpt = None,
+) -> None:
+    from goalsignal.data.sources.config import SourcePathError
+    from goalsignal.data.sources.fifa_current import load_current_fifa, write_reports
+
+    try:
+        path = _require_current_fifa()
+        cfg = _load_config(config, input_dir)
+        matches = _canonical_matches(cfg)
+        teams = set(matches["home_team"]) | set(matches["away_team"])
+        df, manifest, quality = load_current_fifa(path, teams)
+    except (SourcePathError, ValueError) as exc:
+        typer.echo(f"Validation failed: {exc}", err=True)
+        raise typer.Exit(code=1) from None
+    write_reports(df, manifest, quality)
+    typer.echo(
+        f"Current FIFA snapshot OK: {quality['rows']} rows, {quality['groups']} groups, "
+        f"release {quality['release_date']}, sha256={quality['sha256']}"
+    )
+
+
+@fifa_current_app.command("compare-elo")
+def fifa_current_compare_elo(
+    config: ConfigOpt = Path("config/data.yaml"),
+    input_dir: InputDirOpt = None,
+) -> None:
+    from goalsignal.data.sources.fifa_current import compare_with_elo, write_reports
+
+    current = _current_fifa(config, input_dir)
+    if current is None:
+        typer.echo("FIFA_CURRENT_RANKINGS_PATH is not configured.", err=True)
+        raise typer.Exit(code=1)
+    df, manifest, quality = current
+    _matches, live = _live_model(config, input_dir)
+    comparison = compare_with_elo(df, live.ratings)
+    write_reports(df, manifest, quality, comparison)
+    summary = comparison[1]
+    typer.echo(
+        f"Spearman={summary['spearman_rank_correlation']:.4f}; "
+        f"Pearson={summary['pearson_strength_correlation']:.4f}; "
+        f"top-10 overlap={summary['top_10_overlap']}"
+    )
+    typer.echo("Reports: artifacts/reports/fifa_current_2026_vs_elo.{csv,json}")
+
+
+@fifa_current_app.command("report")
+def fifa_current_report() -> None:
+    import json
+
+    path = resolve("artifacts/reports/fifa_current_2026_vs_elo.json")
+    if not path.exists():
+        typer.echo("No comparison report; run `fifa-current compare-elo`.", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(json.dumps(json.loads(path.read_text(encoding="utf-8")), indent=2))
 
 
 @fifa_app.command("inspect")

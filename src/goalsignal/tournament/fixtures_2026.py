@@ -73,6 +73,7 @@ def derive_2026_group_stage(
                 group=team_to_group[row.home_team],
                 home=row.home_team,
                 away=row.away_team,
+                fixture_id=row.canonical_match_id,
                 neutral=bool(row.neutral) if row.neutral is not None else True,
                 played=played,
                 home_goals=int(row.home_score_recorded) if played else None,

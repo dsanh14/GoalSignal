@@ -1,0 +1,8 @@
+# Frozen 2026 World Cup field ranking snapshot. This is deliberately separate
+# from the historical FIFA timeline used by chronological experiments.
+enabled: false
+path_env: FIFA_CURRENT_RANKINGS_PATH
+release_date: "2026-06-11"
+expected_columns: [group, team, fifa_rank]
+license: "User-provided; verify FIFA terms before redistribution"
+attribution: "FIFA/Coca-Cola World Ranking"

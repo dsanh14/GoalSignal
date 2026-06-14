@@ -86,6 +86,27 @@ def test_correction_requires_reason_and_target(tmp_path):
     assert verify_results(store) == []
 
 
+def test_correction_must_target_same_active_fixture(tmp_path):
+    store = tmp_path / "results.jsonl"
+    first = record_result("fix1", 2, 0, "2026-06-12", "manual", path=store)
+    other = record_result("fix2", 1, 0, "2026-06-12", "manual", path=store)
+    with pytest.raises(ValueError, match="different fixture"):
+        record_result(
+            "fix1", 1, 1, "2026-06-12", "manual", path=store,
+            corrects=other["entry_hash"], correction_reason="wrong target",
+        )
+    corrected = record_result(
+        "fix1", 1, 1, "2026-06-12", "manual", path=store,
+        corrects=first["entry_hash"], correction_reason="first correction",
+    )
+    with pytest.raises(ValueError, match="current active"):
+        record_result(
+            "fix1", 0, 0, "2026-06-12", "manual", path=store,
+            corrects=first["entry_hash"], correction_reason="stale target",
+        )
+    assert corrected["payload"]["outcome"] == "draw"
+
+
 def test_completed_before_kickoff_rejected(tmp_path):
     with pytest.raises(ValueError, match="before the kickoff"):
         record_result("fix1", 1, 1, "2026-06-11", "manual",

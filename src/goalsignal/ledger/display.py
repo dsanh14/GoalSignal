@@ -36,6 +36,9 @@ def flatten_entry(entry: dict) -> dict:
         "score_model": p.get("score_model_version", SCORE_MODEL_UNRECORDED),
         "fixture_id": p.get("fixture_id", ""),
         "entry_hash": entry.get("entry_hash", ""),
+        "result_store_hash": p.get("result_store_hash"),
+        "active_result_count": p.get("active_result_count"),
+        "revision": p.get("revision", p.get("model_version", "")),
     }
 
 
@@ -54,6 +57,20 @@ def filter_entries(
     if date is not None:
         out = [e for e in out if e["payload"].get("kickoff_timestamp", "") == date]
     return out
+
+
+def latest_entries(entries: list[dict]) -> list[dict]:
+    """Latest appended immutable revision for each fixture."""
+    latest: dict[str, dict] = {}
+    for entry in entries:
+        latest[entry["payload"].get("fixture_id", "")] = entry
+    return list(latest.values())
+
+
+def model_version_entries(entries: list[dict], model_version: str | None) -> list[dict]:
+    if model_version is None:
+        return entries
+    return [e for e in entries if e["payload"].get("model_version") == model_version]
 
 
 def find_entry(entries: list[dict], prediction_id: str) -> dict | None:

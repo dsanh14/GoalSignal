@@ -171,6 +171,25 @@ class FifaRankingsConfig(BaseModel):
         return cls.model_validate(_load_yaml(path))
 
 
+class FifaCurrentRankingsConfig(BaseModel):
+    """Frozen World Cup field snapshot, separate from historical rankings."""
+
+    enabled: bool = False
+    path_env: str = "FIFA_CURRENT_RANKINGS_PATH"
+    release_date: str = "2026-06-11"
+    expected_columns: list[str] = Field(
+        default_factory=lambda: ["group", "team", "fifa_rank"]
+    )
+    license: str = "user-provided; verify FIFA terms before redistribution"
+    attribution: str = "FIFA/Coca-Cola World Ranking"
+
+    @classmethod
+    def load(
+        cls, path: str | Path = "config/fifa_current_rankings.yaml"
+    ) -> FifaCurrentRankingsConfig:
+        return cls.model_validate(_load_yaml(path))
+
+
 class PlayerDataConfig(BaseModel):
     """Transfermarkt-derived player/club history.
 

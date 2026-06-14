@@ -68,7 +68,12 @@ uv run goalsignal ratings build       # Elo timeline + final ratings
 uv run goalsignal ratings inspect     # current top-rated teams
 uv run goalsignal evaluate rolling    # 2010-2025 expanding-window backtest
 uv run goalsignal tournament simulate # 100k-sim 2026 WC group stage
+uv run goalsignal fifa-current validate
+uv run goalsignal fifa-current compare-elo
+uv run goalsignal results verify
+uv run goalsignal feedback summary
 uv run goalsignal predict remaining   # ledger predictions for scheduled fixtures
+uv run goalsignal predictions scores --latest-only
 uv run goalsignal ledger list         # show immutable predictions
 uv run goalsignal ledger verify       # verify the hash chain
 uv run goalsignal benchmark           # measured simulator performance
@@ -83,6 +88,8 @@ Outputs:
 - `artifacts/reports/` — data-quality audits and backtest reports
 - `artifacts/ratings/`, `artifacts/simulations/`, `artifacts/benchmarks/`
 - `artifacts/predictions/ledger.jsonl` — append-only, hash-chained forecasts
+- `artifacts/results/results.jsonl` — separate append-only result history
+- `artifacts/simulations/<version>/` — result-hash-versioned live simulations
 - `artifacts/manifests/` — content-hashed dataset manifests
 
 ## Development

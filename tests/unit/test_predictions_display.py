@@ -21,6 +21,8 @@ from goalsignal.ledger.display import (
     format_csv,
     format_json,
     format_table,
+    latest_entries,
+    model_version_entries,
 )
 from goalsignal.ledger.storage import append_predictions, list_entries, verify_ledger
 from goalsignal.live import score_summary
@@ -156,3 +158,17 @@ def test_formats(ledger):
     payloads = json.loads(format_json(entries))
     assert len(payloads) == 2
     assert payloads[0]["top_scorelines"][0] == {"home": 1, "away": 0, "p": 0.14}
+
+
+def test_revision_filters(ledger):
+    entries = list_entries(ledger)
+    revised = _entry("f1")
+    revised["model_version"] = "test-v1+r1"
+    append_predictions([revised], ledger)
+    entries = list_entries(ledger)
+    latest = latest_entries(entries)
+    assert len(latest) == 2
+    assert next(e for e in latest if e["payload"]["fixture_id"] == "f1")[
+        "payload"
+    ]["model_version"] == "test-v1+r1"
+    assert len(model_version_entries(entries, "test-v1+r1")) == 1

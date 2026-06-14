@@ -88,7 +88,7 @@ def score_summary(goal_model, feats: pd.DataFrame, k: int = 5) -> dict:
     }
 
 
-def build_prediction_payload(live: LiveModel, row) -> dict:
+def build_prediction_payload(live: LiveModel, row, revision_metadata: dict | None = None) -> dict:
     """Ledger payload for one scheduled fixture (schema identical to v1).
 
     `row` is a canonical-match itertuple. W/D/L probabilities come from the
@@ -97,7 +97,7 @@ def build_prediction_payload(live: LiveModel, row) -> dict:
     feats = live.feature_row(row.home_team, row.away_team, bool(row.neutral))
     probs = live.predict_outcome(feats)[0]
     s = score_summary(live.goal_model, feats, k=5)
-    return {
+    payload = {
         "fixture_id": row.canonical_match_id,
         "home_team": row.home_team,
         "away_team": row.away_team,
@@ -123,6 +123,8 @@ def build_prediction_payload(live: LiveModel, row) -> dict:
             "features limited to pre-match Elo and venue context",
         ],
     }
+    payload.update(revision_metadata or {})
+    return payload
 
 
 def train_live_model(

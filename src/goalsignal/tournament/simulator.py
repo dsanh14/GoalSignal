@@ -32,6 +32,7 @@ class GroupFixture:
     group: str
     home: str
     away: str
+    fixture_id: str | None = None
     neutral: bool = True
     played: bool = False
     home_goals: int | None = None
@@ -64,6 +65,23 @@ def _presample_scores(fixtures, model, n_sims: int, rng: np.random.Generator):
         flat = rng.choice(matrix.size, size=n_sims, p=matrix.ravel() / matrix.sum())
         sampled[i] = (flat // matrix.shape[1], flat % matrix.shape[1])
     return sampled
+
+
+def validate_completed_overlay(fixtures: list[GroupFixture], active: dict[str, dict]) -> None:
+    """Prove active completed fixtures are fixed once and never sampled."""
+    seen = [f.fixture_id for f in fixtures if f.played and f.fixture_id in active]
+    if len(seen) != len(active) or len(seen) != len(set(seen)):
+        raise ValueError(
+            f"completed overlay mismatch: {len(active)} active results, "
+            f"{len(seen)} fixed fixture occurrences"
+        )
+    for f in fixtures:
+        if f.fixture_id in active:
+            r = active[f.fixture_id]
+            if not f.played or (f.home_goals, f.away_goals) != (
+                r["regulation_home_goals"], r["regulation_away_goals"]
+            ):
+                raise ValueError(f"completed fixture {f.fixture_id[:12]} not fixed exactly")
 
 
 def simulate_groups(

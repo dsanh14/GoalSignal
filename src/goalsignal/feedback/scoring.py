@@ -63,6 +63,10 @@ def score_prediction(payload: dict, result: dict) -> dict:
         "total_goal_abs_error": abs((lam_h + lam_a) - (hg + ag))
         if lam_h is not None and lam_a is not None
         else None,
+        "predicted_total_goals": (lam_h + lam_a)
+        if lam_h is not None and lam_a is not None
+        else None,
+        "actual_total_goals": hg + ag,
         "top_scoreline": f"{best['home']}-{best['away']}" if best else None,
         "exact_score_correct": bool(
             best and best["home"] == hg and best["away"] == ag

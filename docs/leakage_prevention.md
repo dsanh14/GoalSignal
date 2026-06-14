@@ -1,5 +1,11 @@
 # Leakage Prevention
 
+The June 11, 2026 current FIFA snapshot is unavailable before its release date
+and remains outside the historical timeline. Completed results alter only
+future Elo state and future prediction revisions. Frozen forecasts are scored
+without modification, and simulations fix observed scores instead of sampling
+completed fixtures.
+
 For a prediction generated at time T, every input must have been available
 before T. This document records the project-wide rules; each modeling
 milestone must add its own tests against them.
