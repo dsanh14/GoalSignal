@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Annotated
 
+import pandas as pd
 import typer
 
 from goalsignal.utils.paths import resolve
@@ -269,47 +270,69 @@ def _current_fifa(config: Path, input_dir: Path | None):
 def tournament_simulate(
     sims: Annotated[int, typer.Option(help="Number of Monte Carlo simulations.")] = 100_000,
     seed: Annotated[int, typer.Option(help="Random seed.")] = 20260612,
+    force: Annotated[
+        bool, typer.Option("--force", help="Overwrite the same versioned simulation.")
+    ] = False,
     config: ConfigOpt = Path("config/data.yaml"),
     input_dir: InputDirOpt = None,
 ) -> None:
-    """Simulate the 2026 World Cup group stage from the dataset's fixtures.
+    """Simulate the full 2026 World Cup from groups through the champion."""
+    import time
 
-    Knockout simulation beyond Round-of-32 qualification requires the official
-    bracket mapping, which is not in the dataset and is never fabricated.
-    """
-    from goalsignal.feedback.results import active_results, result_store_hash
+    from goalsignal.feedback.results import (
+        active_results,
+        result_store_hash,
+        verify_results,
+    )
+    from goalsignal.tournament.bracket_2026 import OfficialBracket
     from goalsignal.tournament.fixtures_2026 import derive_2026_group_stage
+    from goalsignal.tournament.full_simulator import (
+        apply_official_group_letters,
+        check_full_invariants,
+        simulate_full_tournament,
+    )
     from goalsignal.tournament.live_update import (
-        result_frame,
         simulation_version,
-        write_group_reports,
-        write_versioned_simulation,
     )
     from goalsignal.tournament.model_adapter import RatingsGoalAdapter
-    from goalsignal.tournament.simulator import (
-        check_invariants,
-        simulate_groups_fast,
-        validate_completed_overlay,
+    from goalsignal.tournament.reporting import (
+        advancement_frame,
+        write_full_simulation,
+        write_ticket_advisory,
     )
+    from goalsignal.tournament.simulator import validate_completed_overlay
+
+    result_problems = verify_results()
+    if result_problems:
+        typer.echo(f"Result store verification failed: {result_problems}", err=True)
+        raise typer.Exit(code=1)
+    bracket = OfficialBracket.load()
 
     matches, live = _live_model(config, input_dir)
     groups, fixtures = derive_2026_group_stage(matches)
     active = active_results()
     validate_completed_overlay(fixtures, active)
     fifa = _current_fifa(config, input_dir)
-    snapshot_id = None
-    official_groups = {}
-    if fifa is not None:
-        fifa_df, _manifest, _quality = fifa
-        snapshot_id = fifa_df["source_snapshot_id"].iloc[0]
-        official_groups = {
-            g: list(block["canonical_team"])
-            for g, block in fifa_df.groupby("group", sort=True)
-        }
+    if fifa is None:
+        typer.echo(
+            "FIFA_CURRENT_RANKINGS_PATH is required to resolve official groups A-L.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    fifa_df, _manifest, _quality = fifa
+    snapshot_id = fifa_df["source_snapshot_id"].iloc[0]
+    official_groups = {
+        g: list(block["canonical_team"])
+        for g, block in fifa_df.groupby("group", sort=True)
+    }
+    groups, fixtures = apply_official_group_letters(groups, fixtures, official_groups)
     adapter = RatingsGoalAdapter(live.ratings, live.goal_model)
-    result = simulate_groups_fast(groups, fixtures, adapter, n_sims=sims, seed=seed)
-
-    problems = check_invariants(result)
+    started = time.perf_counter()
+    result = simulate_full_tournament(
+        groups, fixtures, adapter, bracket, n_sims=sims, seed=seed
+    )
+    runtime = time.perf_counter() - started
+    problems = check_full_invariants(result)
     if problems:
         for p in problems:
             typer.echo(f"INVARIANT VIOLATION: {p}", err=True)
@@ -317,11 +340,15 @@ def tournament_simulate(
     if adapter.unrated_teams:
         typer.echo(f"NOTE: unrated teams given default 1500: {sorted(adapter.unrated_teams)}")
 
-    import pandas as pd
-
-    df = result_frame(result)
+    df = advancement_frame(result)
     result_hash = result_store_hash()
-    version = simulation_version(result_hash, live.model_version, snapshot_id)
+    version = simulation_version(
+        result_hash, live.model_version, snapshot_id, bracket.config_hash
+    )
+    out = resolve(Path("artifacts/simulations") / version)
+    if (out / "wc2026_tournament_meta.json").exists() and not force:
+        typer.echo(f"Refusing to overwrite {out}; pass --force.", err=True)
+        raise typer.Exit(code=1)
     completed = [
         {
             "fixture_id": f.fixture_id,
@@ -344,22 +371,136 @@ def tournament_simulate(
         "remaining_fixture_count": sum(not f.played for f in fixtures),
         "fifa_snapshot_id": snapshot_id,
         "simulation_version": version,
+        "bracket_config_hash": bracket.config_hash,
+        "third_place_table_hash": bracket.table_hash,
+        "official_source_manifest": bracket.source_manifest,
+        "runtime_seconds": runtime,
+        "resolution_counts": dict(result.resolution_counts),
         "diagnostics": live.diagnostics,
-        "groups_label_note": "group labels G01..G12 are synthetic (derived from "
-        "fixture graph); official letters are not in the dataset",
-        "knockout_note": "knockout bracket beyond R32 qualification requires the "
-        "official bracket mapping; not fabricated",
+        "groups_label_note": "official groups A-L from the validated FIFA snapshot",
+        "modal_bracket_note": "probabilistic summary only; no matchup is confirmed",
     }
-    out = write_versioned_simulation(df, meta, version)
-    if official_groups:
-        previous_path = resolve("artifacts/simulations/wc2026_group_stage.csv")
-        previous = pd.read_csv(previous_path) if previous_path.exists() else None
-        write_group_reports(df, official_groups, previous)
+    out = write_full_simulation(result, bracket, meta, version)
+    top_contenders = set(fifa_df.nsmallest(10, "fifa_rank")["canonical_team"])
+    ticket_paths = write_ticket_advisory(result, bracket, top_contenders)
 
-    typer.echo(f"Simulations: {sims} (seed {seed}); cutoff {live.cutoff.date()}")
-    typer.echo(df.sort_values("p_reach_round_of_32", ascending=False)
+    typer.echo(
+        f"Simulations: {sims} (seed {seed}); cutoff {live.cutoff.date()}; "
+        f"runtime {runtime:.2f}s"
+    )
+    typer.echo(df[["team", "p_round_of_32", "p_quarterfinal", "p_final", "p_champion"]]
                .head(15).to_string(index=False))
-    typer.echo(f"Full table: {out / 'wc2026_group_stage.csv'}")
+    typer.echo(f"Full tournament artifacts: {out}")
+    typer.echo(f"Ticket advisory: {ticket_paths[0]} and {ticket_paths[1]}")
+
+
+@tournament_app.command("validate-bracket")
+def tournament_validate_bracket() -> None:
+    """Validate official source hashes, all 495 combinations, and M73-M104."""
+    from goalsignal.tournament.bracket_2026 import OfficialBracket
+
+    bracket = OfficialBracket.load()
+    typer.echo(
+        f"Bracket valid: {len(bracket.matches)} matches, "
+        f"{len(bracket.third_assignments)} third-place combinations."
+    )
+
+
+@tournament_app.command("inspect-bracket")
+def tournament_inspect_bracket() -> None:
+    """Display the official symbolic bracket without projected team names."""
+    from goalsignal.tournament.bracket_2026 import OfficialBracket
+
+    bracket = OfficialBracket.load()
+    for number in sorted(bracket.matches):
+        match = bracket.matches[number]
+        typer.echo(
+            f"M{number}: {match.entrants[0]} v {match.entrants[1]} | "
+            f"{match.date} {match.time_et} ET | {match.host_city}"
+        )
+
+
+def _latest_tournament_dir(version: str | None = None) -> Path:
+    root = resolve("artifacts/simulations")
+    if version:
+        path = root / version
+    else:
+        candidates = list(root.glob("*/wc2026_tournament_meta.json"))
+        if not candidates:
+            raise FileNotFoundError("no full tournament simulation exists")
+        path = max(candidates, key=lambda item: item.stat().st_mtime).parent
+    if not (path / "wc2026_tournament_meta.json").exists():
+        raise FileNotFoundError(f"no full tournament simulation in {path}")
+    return path
+
+
+@tournament_app.command("advancement")
+def tournament_advancement(
+    version: Annotated[str | None, typer.Option(help="Simulation version.")] = None,
+) -> None:
+    """Print advancement probabilities from R32 through champion."""
+    import pandas as pd
+
+    path = _latest_tournament_dir(version) / "wc2026_team_advancement.csv"
+    frame = pd.read_csv(path)
+    cols = ["team", "p_round_of_32", "p_round_of_16", "p_quarterfinal",
+            "p_semifinal", "p_final", "p_champion"]
+    typer.echo(frame[cols].to_string(index=False))
+    typer.echo(f"Source: {path}")
+
+
+@tournament_app.command("matchup-probabilities")
+def tournament_matchup_probabilities(
+    match_number: Annotated[int, typer.Option("--match-number", min=73, max=104)],
+    version: Annotated[str | None, typer.Option(help="Simulation version.")] = None,
+) -> None:
+    """Print likely matchups for one official match number."""
+    import pandas as pd
+
+    from goalsignal.tournament.bracket_2026 import OfficialBracket
+    from goalsignal.tournament.reporting import ROUND_FILES
+
+    bracket = OfficialBracket.load()
+    round_name = bracket.matches[match_number].round
+    if round_name == "third_place":
+        filename = "wc2026_third_place_matchups.csv"
+    else:
+        filename = ROUND_FILES[round_name]
+    path = _latest_tournament_dir(version) / filename
+    frame = pd.read_csv(path)
+    typer.echo(
+        frame[frame["match_number"] == match_number]
+        .head(20)
+        .to_string(index=False)
+    )
+
+
+@tournament_app.command("bracket")
+def tournament_bracket(
+    version: Annotated[str | None, typer.Option(help="Simulation version.")] = None,
+) -> None:
+    """Display the modal probabilistic bracket summary."""
+    import json
+
+    path = _latest_tournament_dir(version) / "wc2026_bracket.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    typer.echo(data["label"])
+    for match in data["matches"]:
+        typer.echo(
+            f"M{match['match_number']}: {' v '.join(match['modal_matchup'])} "
+            f"({match['matchup_probability']:.2%}); conditional pick "
+            f"{match['modal_conditional_winner']} "
+            f"({match['conditional_win_probability']:.2%})"
+        )
+
+
+@tournament_app.command("ticket-advisory")
+def tournament_ticket_advisory() -> None:
+    """Print the current late-round ticket-planning report."""
+    path = resolve("artifacts/reports/wc2026_ticket_advisory.csv")
+    if not path.exists():
+        raise typer.BadParameter("run tournament simulate first")
+    typer.echo(path.read_text(encoding="utf-8"))
 
 
 @predict_app.command("remaining")
@@ -1584,12 +1725,594 @@ def sources_readiness() -> None:
 
 playerdata_app = typer.Typer(help="Transfermarkt-derived player/club audit (read-only, optional).")
 app.add_typer(playerdata_app, name="player-data")
+squads_app = typer.Typer(help="Official 2026 squad ingestion and player-data readiness.")
+app.add_typer(squads_app, name="squads")
 
 
 def _player_source():
     from goalsignal.data.sources.player_data import PlayerDataSource
 
     return PlayerDataSource.resolve_from_env()
+
+
+def _squad_source_inputs():
+    import os
+
+    from goalsignal.data.sources.config import SquadDataConfig
+    from goalsignal.data.sources.squads import (
+        load_reviewed_aliases,
+        load_squads,
+        resolve_squad_path,
+    )
+
+    _load_env()
+    config = SquadDataConfig.load()
+    path = resolve_squad_path(config)
+    canonical = _canonical_team_set()
+    squads, manifest, quality = load_squads(
+        path, canonical_teams=canonical, config=config
+    )
+    aliases = load_reviewed_aliases(os.environ.get(config.player_aliases_path_env))
+    return config, path, squads, manifest, quality, aliases
+
+
+def _squad_links():
+    from goalsignal.data.sources.squads import (
+        link_squad_players,
+        load_seed_link_candidates,
+        resolve_optional_reference_path,
+        revalidate_seed_links,
+        write_seed_link_reports,
+    )
+
+    config, path, squads, manifest, quality, aliases = _squad_source_inputs()
+    source = _player_source()
+    players = source.read_table("players")
+    candidate_path = resolve_optional_reference_path(
+        config.link_candidates_path_env, config.link_candidates_default_path
+    )
+    if candidate_path is None:
+        raise ValueError("squad seed-link candidate file is not configured")
+    candidates = load_seed_link_candidates(candidate_path)
+    seed_report, seed_summary = revalidate_seed_links(squads, candidates, players)
+    write_seed_link_reports(seed_report, seed_summary)
+    links = link_squad_players(squads, players, aliases, seed_report)
+    links.attrs["seed_summary"] = seed_summary
+    links.attrs["players"] = players
+    return config, path, squads, manifest, quality, source, links
+
+
+def _squad_reconciliation(config, squads):
+    from goalsignal.data.sources.squads import (
+        load_official_extract,
+        reconcile_official_extract,
+        resolve_optional_reference_path,
+        write_reconciliation_reports,
+    )
+
+    extract_path = resolve_optional_reference_path(
+        config.official_extract_path_env, config.official_extract_default_path
+    )
+    if extract_path is None:
+        raise ValueError("official expanded squad extract is not configured")
+    report, summary = reconcile_official_extract(
+        squads, load_official_extract(extract_path)
+    )
+    write_reconciliation_reports(report, summary)
+    return summary
+
+
+@squads_app.command("inspect")
+def squads_inspect() -> None:
+    """Show configured squad-related paths without reading secrets."""
+    import os
+
+    from goalsignal.data.sources.config import SquadDataConfig
+
+    _load_env()
+    config = SquadDataConfig.load()
+    for label, env_name in (
+        ("official squads", config.squads_path_env),
+        ("official extract", config.official_extract_path_env),
+        ("seed candidates", config.link_candidates_path_env),
+        ("availability", config.availability_path_env),
+        ("reviewed aliases", config.player_aliases_path_env),
+    ):
+        raw = os.environ.get(env_name, "")
+        default = {
+            config.squads_path_env: config.squads_default_path,
+            config.official_extract_path_env: config.official_extract_default_path,
+            config.link_candidates_path_env: config.link_candidates_default_path,
+        }.get(env_name, "")
+        configured = raw or default or "not configured"
+        typer.echo(f"{label:18s} {configured} ({env_name})")
+    typer.echo("Template: data/reference/world_cup_2026_squads_template.csv")
+
+
+@squads_app.command("validate")
+def squads_validate(
+    cutoff: Annotated[
+        str | None,
+        typer.Option(help="Optional prediction cutoff; rejects unpublished rows."),
+    ] = None,
+) -> None:
+    """Validate the official squad CSV and its publication-time semantics."""
+    from goalsignal.data.sources.squads import (
+        SquadDataUnavailable,
+        assert_squads_available_at,
+    )
+
+    try:
+        config, path, squads, manifest, quality, _aliases = _squad_source_inputs()
+        reconciliation = _squad_reconciliation(config, squads)
+        if cutoff:
+            assert_squads_available_at(squads, cutoff)
+    except (SquadDataUnavailable, ValueError) as exc:
+        typer.echo(f"Squad validation failed: {exc}", err=True)
+        raise typer.Exit(code=1) from None
+    typer.echo(
+        f"Squad source valid: rows={quality['rows']}, teams={quality['teams']}, "
+        f"groups={quality['groups']}, snapshot={manifest['snapshot_id']}, path={path}"
+    )
+    typer.echo(
+        f"Official extract: {reconciliation['matched_rows']}/"
+        f"{reconciliation['primary_rows']} reconciled"
+    )
+
+
+@squads_app.command("ingest")
+def squads_ingest(
+    force: Annotated[
+        bool, typer.Option("--force", help="Replace generated normalized output.")
+    ] = False,
+) -> None:
+    """Normalize an official squad CSV and write quality/provenance reports."""
+    from goalsignal.data.sources.squads import SquadDataUnavailable, write_squad_reports
+
+    try:
+        config, _path, squads, manifest, quality, _aliases = _squad_source_inputs()
+        reconciliation = _squad_reconciliation(config, squads)
+    except (SquadDataUnavailable, ValueError) as exc:
+        typer.echo(f"Squad ingestion failed: {exc}", err=True)
+        raise typer.Exit(code=1) from None
+    out = resolve(f"artifacts/player_data/squads_{manifest['snapshot_id']}.csv")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if out.exists() and not force:
+        typer.echo(f"Refusing to overwrite {out}; pass --force.", err=True)
+        raise typer.Exit(code=1)
+    normalized = squads[
+        SQUAD_NORMALIZED_COLUMNS
+    ].copy()
+    normalized.to_csv(out, index=False)
+    paths = write_squad_reports(squads, manifest, quality)
+    typer.echo(
+        f"Ingested {len(squads)} squad rows for {quality['teams']} teams; "
+        f"normalized={out}"
+    )
+    typer.echo("Reports: " + ", ".join(str(path) for path in paths))
+    typer.echo(f"Official extract reconciliation: {reconciliation}")
+
+
+SQUAD_NORMALIZED_COLUMNS = [
+    "snapshot_date",
+    "group",
+    "canonical_team",
+    "player_name",
+    "date_of_birth_normalized",
+    "position",
+    "club_normalized",
+    "shirt_number",
+    "squad_status",
+    "source_name",
+    "source_url_or_reference",
+    "source_publication_date",
+    "source_player_id",
+    "notes",
+    "source_row",
+    "normalized_player_name",
+]
+
+
+@squads_app.command("coverage")
+def squads_coverage() -> None:
+    """Write squad coverage, or an explicit missing-source report."""
+    from goalsignal.data.sources.squads import (
+        SquadDataUnavailable,
+        write_missing_source_reports,
+        write_squad_reports,
+    )
+
+    try:
+        _config, _path, squads, manifest, quality, _aliases = _squad_source_inputs()
+    except SquadDataUnavailable as exc:
+        report = write_missing_source_reports(str(exc))
+        typer.echo(f"Squad coverage: {report['state']}")
+        typer.echo("Report: artifacts/reports/squad_2026_quality.json")
+        return
+    write_squad_reports(squads, manifest, quality)
+    typer.echo(
+        f"Squad coverage: {quality['rows']} players, {quality['teams']} teams, "
+        f"{quality['groups']} groups, {quality['conflict_count']} conflicts"
+    )
+
+
+@squads_app.command("link-players")
+def squads_link_players() -> None:
+    """Link official squad players to Transfermarkt with deterministic evidence."""
+    from goalsignal.data.sources.squads import (
+        SquadDataUnavailable,
+        write_alias_review_file,
+        write_link_reports,
+    )
+
+    try:
+        _config, _path, squads, _manifest, _quality, _source, links = _squad_links()
+    except SquadDataUnavailable as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from None
+    summary = write_link_reports(links)
+    alias_path = write_alias_review_file(squads, links, links.attrs["players"])
+    typer.echo(
+        f"Player links: {summary['linked']}/{summary['total']} "
+        f"({summary['link_rate']:.1%}); by class={summary['by_class']}"
+    )
+    typer.echo("Reports: artifacts/reports/squad_player_*.csv|json")
+    typer.echo(
+        f"Accepted seed links: {links.attrs['seed_summary']['accepted_deterministic']}; "
+        f"manual review: {alias_path}"
+    )
+
+
+def _activity_outputs(cutoff: str, force: bool):
+    import json
+
+    from goalsignal.data.sources.squads import (
+        build_historical_valuations,
+        build_player_activity,
+        write_link_reports,
+    )
+    from goalsignal.utils.hashing import sha256_json
+
+    config, _path, _squads, manifest, _quality, source, links = _squad_links()
+    write_link_reports(links)
+    appearances = source.read_table(
+        "appearances",
+        columns=[
+            "game_id", "player_id", "player_club_id", "date", "competition_id",
+            "minutes_played", "goals", "assists", "yellow_cards", "red_cards",
+        ],
+    )
+    lineups = source.read_table(
+        "game_lineups",
+        columns=["game_id", "player_id", "club_id", "date", "type", "position"],
+    )
+    activity = build_player_activity(
+        links,
+        appearances,
+        lineups,
+        cutoff=cutoff,
+        windows=tuple(config.activity_windows_days),
+    )
+    valuations_raw = source.read_table(
+        "player_valuations", columns=["player_id", "date", "market_value_in_eur"]
+    )
+    tm_snapshot = sha256_json(source.file_hashes())[:16]
+    valuations = build_historical_valuations(
+        links, valuations_raw, cutoff=cutoff, source_snapshot_id=tm_snapshot
+    )
+    snapshot = manifest["snapshot_id"]
+    out = resolve("artifacts/player_data")
+    reports = resolve("artifacts/reports")
+    out.mkdir(parents=True, exist_ok=True)
+    reports.mkdir(parents=True, exist_ok=True)
+    activity_path = out / f"player_activity_{snapshot}.csv"
+    valuation_path = out / f"player_valuations_{snapshot}.csv"
+    if not force and (activity_path.exists() or valuation_path.exists()):
+        raise FileExistsError("player outputs exist; pass --force to replace generated files")
+    activity.to_csv(activity_path, index=False)
+    valuations.to_csv(valuation_path, index=False)
+    coverage_rows = []
+    for dimension in ("overall", "national_team", "group", "position", "match_class"):
+        grouped = [("all", activity)] if dimension == "overall" else activity.groupby(dimension)
+        for value, block in grouped:
+            coverage_rows.append(
+                {
+                    "dimension": dimension,
+                    "value": value,
+                    "players": len(block),
+                    "minutes_30d_available": int(block["minutes_30d"].notna().sum()),
+                    "minutes_90d_available": int(block["minutes_90d"].notna().sum()),
+                    "starts_90d_available": int(block["starts_90d"].notna().sum()),
+                    "cutoff": cutoff,
+                }
+            )
+    coverage = pd.DataFrame(coverage_rows)
+    coverage.to_csv(reports / "player_activity_coverage.csv", index=False)
+    activity.isna().mean().rename("missing_rate").rename_axis("field").reset_index().to_csv(
+        reports / "player_activity_missingness.csv", index=False
+    )
+    temporal = {
+        "valid": True,
+        "cutoff": cutoff,
+        "rows": len(activity),
+        "strictly_prior": True,
+        "target_match_excluded_when_provided": True,
+        "current_profile_fields_used": False,
+        "club_and_national_team_activity_separate": True,
+    }
+    (reports / "player_activity_temporal_validation.json").write_text(
+        json.dumps(temporal, indent=2), encoding="utf-8"
+    )
+    valuation_coverage = []
+    for dimension in ("overall", "national_team", "position"):
+        grouped = (
+            [("all", valuations)]
+            if dimension == "overall"
+            else valuations.groupby(dimension)
+        )
+        for value, block in grouped:
+            ages = pd.to_numeric(block["valuation_age_days"], errors="coerce")
+            valuation_coverage.append(
+                {
+                    "dimension": dimension,
+                    "value": value,
+                    "players": len(block),
+                    "available": int(block["available"].sum()),
+                    "coverage": float(block["available"].mean()),
+                    "median_valuation_age_days": ages.median(),
+                    "stale_over_365_days": int(ages.gt(365).sum()),
+                    "cutoff": cutoff,
+                }
+            )
+    pd.DataFrame(valuation_coverage).to_csv(
+        reports / "player_valuation_coverage.csv", index=False
+    )
+    valuations[
+        ["national_team", "player_name", "valuation_date", "valuation_age_days", "available"]
+    ].to_csv(reports / "player_valuation_age.csv", index=False)
+    return activity, valuations, links, activity_path, valuation_path
+
+
+@squads_app.command("activity")
+def squads_activity(
+    cutoff: Annotated[str, typer.Option(help="Prediction cutoff timestamp.")] = "2026-06-15",
+    force: Annotated[bool, typer.Option("--force")] = False,
+) -> None:
+    """Build cutoff-safe club activity and historical valuations for linked squads."""
+    from goalsignal.data.sources.squads import build_squad_aggregates
+
+    try:
+        activity, valuations, links, activity_path, valuation_path = _activity_outputs(
+            cutoff, force
+        )
+        config, _path, squads, _manifest, _quality, _aliases = _squad_source_inputs()
+    except (ValueError, FileNotFoundError) as exc:
+        typer.echo(f"Squad activity failed: {exc}", err=True)
+        raise typer.Exit(code=1) from None
+    aggregates = build_squad_aggregates(squads, links, activity, valuations, config)
+    reports = resolve("artifacts/reports")
+    aggregates["activity"].to_csv(
+        reports / "squad_2026_activity_summary.csv", index=False
+    )
+    aggregates["position"].to_csv(
+        reports / "squad_2026_position_summary.csv", index=False
+    )
+    aggregates["depth"].to_csv(
+        reports / "squad_2026_depth_summary.csv", index=False
+    )
+    aggregates["missingness"].to_csv(
+        reports / "squad_2026_missingness.csv", index=False
+    )
+    portugal = aggregates["player_level"][
+        aggregates["player_level"]["national_team"].eq("Portugal")
+    ].copy()
+    portugal.to_csv(reports / "portugal_squad_activity.csv", index=False)
+    linked = int(portugal["canonical_player_id"].fillna("").ne("").sum()) if len(portugal) else 0
+    minutes_cov = float(portugal.get("minutes_90d", pd.Series(dtype=float)).notna().mean()) \
+        if len(portugal) else None
+    valuation_cov = float(
+        portugal.get("historical_valuation", pd.Series(dtype=float)).notna().mean()
+    ) if len(portugal) else None
+    lineup_path = reports / "national_team_lineup_coverage.csv"
+    portugal_lineup = None
+    if lineup_path.exists():
+        lineup = pd.read_csv(lineup_path)
+        matched = lineup[lineup["national_team"].eq("Portugal")]
+        portugal_lineup = matched.iloc[0].to_dict() if len(matched) else None
+    position_lines = []
+    for position, block in portugal.groupby("position_group"):
+        position_lines.append(
+            f"- {position} coverage: "
+            f"{int(block['canonical_player_id'].fillna('').ne('').sum())}/{len(block)} "
+            f"linked; 90-day minutes available for "
+            f"{int(block.get('minutes_90d', pd.Series(index=block.index)).notna().sum())}"
+        )
+    depth = aggregates["depth"][
+        aggregates["depth"]["national_team"].eq("Portugal")
+    ]
+    portugal_md = [
+        "# Portugal Squad Data Audit",
+        "",
+        "Descriptive source audit only. No forecast or title probability was changed.",
+        "",
+        f"- Official squad rows: {len(portugal)}",
+        f"- Confident Transfermarkt links: {linked}",
+        f"- Recent club-minutes coverage: {minutes_cov}",
+        f"- Historical-valuation coverage: {valuation_cov}",
+        f"- Ambiguous/unmatched players: {len(portugal) - linked}",
+        *[
+            f"- {days}-day minutes coverage: "
+            f"{float(portugal[f'minutes_{days}d'].notna().mean()) if len(portugal) else None}"
+            for days in config.activity_windows_days
+        ],
+        f"- 90-day starts coverage: "
+        f"{float(portugal.get('starts_90d', pd.Series(dtype=float)).notna().mean())}",
+        *position_lines,
+        (
+            "- Top-11/top-15/top-23 activity minutes: "
+            + (
+                f"{depth.iloc[0]['top_11_minutes_90d']}/"
+                f"{depth.iloc[0]['top_15_minutes_90d']}/"
+                f"{depth.iloc[0]['top_23_minutes_90d']}"
+                if len(depth)
+                else "unavailable"
+            )
+        ),
+        (
+            "- National-team lineup history: "
+            f"{portugal_lineup['readiness']} "
+            f"({portugal_lineup['games_with_lineups']} dated lineups)"
+            if portugal_lineup
+            else "- National-team lineup history: not audited"
+        ),
+        "- Expected-XI modeling: not ready until international lineup history is adequate.",
+        "- Confirmed-lineup modeling: blocked by the API-Football plan.",
+    ]
+    (reports / "portugal_squad_data_audit.md").write_text(
+        "\n".join(portugal_md) + "\n", encoding="utf-8"
+    )
+    typer.echo(
+        f"Activity rows={len(activity)}, valuation rows={len(valuations)}; "
+        f"{activity_path}; {valuation_path}"
+    )
+
+
+@squads_app.command("readiness")
+def squads_readiness() -> None:
+    """Classify squad feature families without training or deployment."""
+    import json
+    import os
+
+    from goalsignal.data.sources.squads import (
+        SquadDataUnavailable,
+        build_feature_readiness,
+        write_missing_source_reports,
+        write_readiness_reports,
+    )
+
+    _load_env()
+    try:
+        *_rest, links = _squad_links()
+        accepted = links["match_class"].isin(
+            {"exact", "high-confidence deterministic"}
+        )
+        rate = float(accepted.mean()) if len(links) else None
+        squad_available = True
+    except SquadDataUnavailable as exc:
+        write_missing_source_reports(str(exc))
+        rate = None
+        squad_available = False
+    statsbomb_available = bool(os.environ.get("STATSBOMB_DATA_PATH"))
+    statsbomb_report = resolve(
+        "artifacts/reports/statsbomb_lineup_continuity_readiness.json"
+    )
+    statsbomb_report.write_text(
+        json.dumps(
+            {
+                "state": "configured_not_audited"
+                if statsbomb_available
+                else "not_configured",
+                "coverage": None,
+                "note": "StatsBomb is optional and is never downloaded automatically.",
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    lineup_path = resolve("artifacts/reports/national_team_lineup_coverage.csv")
+    international_ready = False
+    if lineup_path.exists():
+        lineup = pd.read_csv(lineup_path)
+        international_ready = bool(
+            len(lineup) and lineup["readiness"].isin(["strong", "partial"]).any()
+        )
+    readiness = build_feature_readiness(
+        squad_available=squad_available,
+        identity_link_rate=rate,
+        statsbomb_available=statsbomb_available,
+        international_lineup_ready=international_ready,
+    )
+    paths = write_readiness_reports(readiness)
+    typer.echo(
+        f"Squad source={'available' if squad_available else 'missing'}; "
+        f"identity_link_rate={rate}; reports={paths[0]}, {paths[1]}"
+    )
+
+
+@squads_app.command("team")
+def squads_team(
+    team: Annotated[str, typer.Option("--team")],
+) -> None:
+    """Print one team's squad-data readiness and descriptive player rows."""
+    path = resolve("artifacts/reports/squad_2026_activity_summary.csv")
+    player_path = resolve("artifacts/reports/portugal_squad_activity.csv")
+    if not path.exists():
+        typer.echo("No squad activity report; run `squads activity`.", err=True)
+        raise typer.Exit(code=1)
+    summary = pd.read_csv(path)
+    row = summary[summary["national_team"].str.casefold().eq(team.casefold())]
+    if row.empty:
+        typer.echo(f"Team not found: {team}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(row.to_string(index=False))
+    if team.casefold() == "portugal" and player_path.exists():
+        typer.echo(pd.read_csv(player_path).to_string(index=False))
+
+
+@playerdata_app.command("activity")
+def playerdata_activity(
+    cutoff: Annotated[str, typer.Option(help="Prediction cutoff timestamp.")] = "2026-06-15",
+    force: Annotated[bool, typer.Option("--force")] = False,
+) -> None:
+    """Build linked squad-player activity from dated Transfermarkt observations."""
+    squads_activity(cutoff=cutoff, force=force)
+
+
+@playerdata_app.command("valuations")
+def playerdata_valuations(
+    cutoff: Annotated[str, typer.Option(help="Prediction cutoff timestamp.")] = "2026-06-15",
+    force: Annotated[bool, typer.Option("--force")] = False,
+) -> None:
+    """Build latest historical valuations strictly before a cutoff."""
+    try:
+        _activity, valuations, _links, _activity_path, valuation_path = _activity_outputs(
+            cutoff, force
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        typer.echo(f"Player valuation extraction failed: {exc}", err=True)
+        raise typer.Exit(code=1) from None
+    typer.echo(f"Historical valuations: {len(valuations)} rows -> {valuation_path}")
+
+
+@playerdata_app.command("lineup-coverage")
+def playerdata_lineup_coverage() -> None:
+    """Measure dated national-team lineup coverage separately from club lineups."""
+    from goalsignal.data.sources.player_data import PlayerDataUnavailable
+    from goalsignal.data.sources.squads import national_lineup_coverage
+
+    _load_env()
+    try:
+        source = _player_source()
+    except PlayerDataUnavailable as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(code=0) from None
+    links_path = resolve("artifacts/reports/squad_player_links.csv")
+    links = pd.read_csv(links_path) if links_path.exists() else None
+    coverage = national_lineup_coverage(source, links)
+    out = resolve("artifacts/reports/national_team_lineup_coverage.csv")
+    coverage.to_csv(out, index=False)
+    counts = coverage["readiness"].value_counts().to_dict() if len(coverage) else {}
+    lines = [
+        "# National-Team Lineup Readiness",
+        "",
+        "Transfermarkt is club-centric. Club lineups are never treated as national-team "
+        "lineups.",
+        "",
+        f"Readiness counts: {counts}",
+    ]
+    md = resolve("artifacts/reports/national_team_lineup_readiness.md")
+    md.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    typer.echo(f"National-team lineup coverage: {counts}; reports={out}, {md}")
 
 
 @playerdata_app.command("inspect")

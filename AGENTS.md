@@ -13,11 +13,14 @@ data contains, evaluated strictly chronologically.
 
 ## Project status (verified 2026-06-12)
 
-**Complete:** the core statistical pipeline and group-stage simulation — data
+**Complete:** the core statistical pipeline and full tournament simulation — data
 foundation, Elo ratings, chronological backtesting with baselines, Poisson and
 Dixon-Coles goal models, calibration, ensemble, Monte Carlo group-stage
-simulation of the real 2026 fixtures, and a hash-chained prediction ledger
-holding 70 immutable World Cup forecasts. 55 tests pass; ruff clean.
+and official FIFA knockout simulation of the real 2026 fixtures, and a
+hash-chained prediction ledger holding immutable World Cup forecasts.
+The real 1,248-row squad source is ingested and reconciled, but 75.0% identity
+coverage is insufficient for squad-aware model training.
+Ruff and the current test suite must pass before changes finish.
 
 **Not complete:** the full original roadmap. The live-update milestone now
 includes a separate current-FIFA snapshot, six active results, frozen forecast
@@ -39,12 +42,12 @@ describe the project as finished.
 | 8. Calibration | DONE (M5) | `models/calibration.py` (temperature scaling); isotonic open |
 | 9. Chronological evaluation + bootstrap uncertainty | DONE (M3) | `evaluation/backtest.py`, `evaluation/metrics.py` |
 | 10. Ablations + regime analysis (H1/H2/H4/H5/H6/H9/H10) | OPEN | — |
-| 11. Tournament rules + Monte Carlo simulation | DONE for group stage (M6) | `tournament/`; knockout bracket config open |
+| 11. Tournament rules + Monte Carlo simulation | DONE through champion | `tournament/`, `config/tournament_2026.yaml`; official FIFA M73-M104 graph and all 495 Annexe C combinations |
 | 12. Performance engineering | DONE for simulators (M6) | reference vs vectorized, `goalsignal benchmark`; parallel/C++ open |
 | 13. Continuous learning (result record, drift, champion–challenger) | PARTIAL | `feedback/` + `goalsignal result record|correct`, `feedback match|summary` (append-only result store, post-match scoring, Elo online updates, future-only refresh under `ensemble-v1+rN`); drift + champion–challenger open |
 | 14. Prediction ledger | DONE (M7) | `ledger/storage.py`, `goalsignal ledger *` |
 | 15. API / dashboard / release audit | OPEN | research report done (M8: `docs/research_report.md`) |
-| 16. Enrichment layer (players/lineups/StatsBomb/FIFA/rest/travel) | IN PROGRESS — **Milestones A (contracts) + B (ingestion) done** | A: `data/sources/` protocols/schemas/manifests/config. B: **API-Sports/API-Football** client (`http_client.py`, `api_football.py`, `throttle.py`), raw cache (`cache.py`), normalization (`api_football_normalize.py`), StatsBomb offline loader + aggregation, FIFA loader + as-of + reports, fixture linking (`linking.py`), coverage (`coverage.py`), `goalsignal sources|api-football|statsbomb|fifa-rankings` CLI. (Earlier wrong provider football-data.org was removed — `docs/api_football_migration.md`.) Linking finalization (C), features (D), early/final forecasts + ledger v2 (E), ablations (F), challenger (G) OPEN |
+| 16. Enrichment layer (players/lineups/StatsBomb/FIFA/rest/travel) | IN PROGRESS — contracts, ingestion, D1, real squad ingestion/link audit done | `data/sources/squads.py`, `config/squads.yaml`, `goalsignal squads *`; 936/1,248 deterministic links, no squad model trained |
 
 ### Verified deployment snapshot (from manifests — do not edit by hand)
 
@@ -85,14 +88,15 @@ describe the project as finished.
     block bootstrap), `backtest.py` (expanding-window protocol).
   - `tournament/` — `rules.py` (FIFA tiebreakers incl. head-to-head and
     lots), `knockout.py` (regulation/ET/shootout kept separate),
-    `simulator.py` (reference + vectorized MC, invariants),
-    `fixtures_2026.py` (groups derived from the fixture graph),
-    `model_adapter.py`.
+    `simulator.py` (reference + vectorized group MC), `full_simulator.py`
+    (official M73-M104 path to champion), `bracket_2026.py` (validated FIFA
+    symbolic slots + 495 Annexe C combinations), `fixtures_2026.py`,
+    `model_adapter.py`, `reporting.py`.
   - `ledger/storage.py` — hash-chained append-only prediction ledger.
   - `live.py` — deployment pipeline (mirrors the backtest protocol exactly).
   - `utils/` — repo-root path resolution, SHA-256 hashing.
   - `cli.py` — Typer app, entry point `goalsignal`.
-- `tests/` — 55 tests (`unit/`, `integration/`), synthetic fixtures only
+- `tests/` — unit/integration tests use synthetic fixtures only
   (fictional teams); never depend on the real CSVs.
 - `docs/` — data_setup, data_quality, leakage_prevention, research_report.
 - `data/processed/`, `artifacts/` — generated outputs, git-ignored.
@@ -198,9 +202,10 @@ match results in a separate store — also never in `Datasets/`.
    dependencies require justification (current: numpy, pandas, scipy,
    pydantic, pyyaml, typer).
 9. **Tournament rules live in configuration / dedicated modules**, separate
-   from model logic. The official 2026 Round-of-32 bracket mapping and group
-   letters are NOT in the dataset: group labels G01..G12 are synthetic, and
-   knockout simulation beyond R32 qualification is intentionally absent.
+   from model logic. The dataset's group labels remain synthetic; official
+   A-L labels come from the validated frozen FIFA snapshot. The official 2026
+   M73-M104 mapping and all 495 Annexe C rows are preserved under
+   `data/reference/` and loaded through `config/tournament_2026.yaml`.
    **Never fabricate official fixtures or bracket mappings.**
 
 ## Enrichment layer (optional, Milestone A = contracts only)
@@ -292,6 +297,22 @@ Local datasets in `Datasets/` were audited (read-only). Reports in
   confirmed lineups (plan); unsupported = injuries/suspensions.
 - No models trained, no predictions generated, ledger/result store unchanged.
 
+### Squad-data foundation (2026-06-15)
+
+- Optional official squad, availability, and reviewed-alias paths are defined
+  in `config/squads.yaml` and `.env.example`.
+- `data/sources/squads.py` implements BOM-safe official squad validation,
+  content manifests, strict publication cutoffs, deterministic player linkage,
+  dated activity/valuation extraction, lineup coverage, descriptive aggregates,
+  expected-lineup/path contracts, Portugal audit, and readiness reports.
+- Local Transfermarkt remains read-only and club-centric; StatsBomb remains
+  not configured; API-Football 2026 lineups remain plan-locked.
+- The repository-default snapshot validates at 1,248 rows, 48 teams, and 26
+  players per team; the official extract reconciles 100%.
+- Identity resolution links 936/1,248 players (75.0%); Portugal remains 0/26
+  under the conservative evidence rules.
+- No model is trained, and forecasts/ledgers are untouched by this milestone.
+
 ### Milestone D1 — leakage-safe feature engineering + ablation (offline)
 
 Built FIFA, FIFA-Elo disagreement, recent-form, attack/defense, rest, and basic
@@ -319,7 +340,7 @@ venue features and evaluated them via chronological ablation. **Deployed
 
 ## Conventions
 
-- Python 3.12, uv-managed. Ruff (line length 100); pytest; **166 tests** must pass
+- Python 3.12, uv-managed. Ruff (line length 100); pytest; all tests must pass
   and lint must be clean before finishing any change.
 - Paths resolve against the repo root (`goalsignal.utils.paths.resolve`).
 - CLI commands validate inputs, exit nonzero on failure, print artifact
@@ -341,9 +362,9 @@ appears: `ls -lO .venv/lib/python3.12/site-packages/*.pth` and
 
 ## Open work (priority order)
 
-1. **Official 2026 knockout bracket mapping** — user-supplied
-   `config/tournament_2026.yaml` (schema + validation needed); unlocks
-   R32→champion probabilities. Time-critical: group stage ends 2026-06-27.
+1. **Official 2026 squad CSV** — provide `FIFA_2026_SQUADS_PATH` using
+   `data/reference/world_cup_2026_squads_template.csv`, then run squad
+   validation, linkage, activity, Portugal, and readiness audits.
 2. **Form / venue / travel / rest / head-to-head features** — the next
    plausible accuracy gain (research report H8: new information, not new
    model classes).

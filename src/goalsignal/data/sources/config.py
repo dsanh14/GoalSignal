@@ -223,6 +223,47 @@ class PlayerDataConfig(BaseModel):
         return cls.model_validate(_load_yaml(path))
 
 
+class SquadDataConfig(BaseModel):
+    """Official 2026 squad membership and reviewed supplementary inputs."""
+
+    enabled: bool = False
+    squads_path_env: str = "FIFA_2026_SQUADS_PATH"
+    squads_default_path: str = "Datasets/world_cup_2026_squads.csv"
+    official_extract_path_env: str = "FIFA_2026_SQUAD_EXTRACT_PATH"
+    official_extract_default_path: str = (
+        "Datasets/world_cup_2026_official_squad_extract.csv"
+    )
+    link_candidates_path_env: str = "FIFA_2026_PLAYER_LINK_CANDIDATES_PATH"
+    link_candidates_default_path: str = (
+        "Datasets/world_cup_2026_player_link_candidates.csv"
+    )
+    availability_path_env: str = "FIFA_2026_AVAILABILITY_PATH"
+    player_aliases_path_env: str = "FIFA_2026_PLAYER_ALIASES_PATH"
+    allowed_statuses: list[str] = Field(
+        default_factory=lambda: ["selected", "reserve", "replacement", "withdrawn"]
+    )
+    position_groups: dict[str, list[str]] = Field(
+        default_factory=lambda: {
+            "goalkeeper": ["goalkeeper", "keeper"],
+            "defender": ["defender", "defence", "back"],
+            "midfielder": ["midfielder", "midfield"],
+            "forward": ["forward", "attack", "striker", "winger"],
+        }
+    )
+    activity_windows_days: list[int] = Field(
+        default_factory=lambda: [30, 90, 180, 365]
+    )
+    expected_rows: int | None = None
+    expected_teams: int | None = None
+    expected_players_per_team: int | None = None
+    license: str = "Official FIFA/federation squad publications; per-source terms"
+    attribution: str = "Official FIFA World Cup 2026 squad source"
+
+    @classmethod
+    def load(cls, path: str | Path = "config/squads.yaml") -> SquadDataConfig:
+        return cls.model_validate(_load_yaml(path))
+
+
 # Backwards-compatible alias (older code referenced PlayerFeaturesConfig).
 class PlayerFeaturesConfig(BaseModel):
     enabled: bool = False

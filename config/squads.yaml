@@ -1,0 +1,27 @@
+# Official 2026 World Cup squad membership and reviewed player inputs.
+# All paths come from environment variables; no source is enabled by default.
+
+enabled: false
+squads_path_env: FIFA_2026_SQUADS_PATH
+squads_default_path: Datasets/world_cup_2026_squads.csv
+official_extract_path_env: FIFA_2026_SQUAD_EXTRACT_PATH
+official_extract_default_path: Datasets/world_cup_2026_official_squad_extract.csv
+link_candidates_path_env: FIFA_2026_PLAYER_LINK_CANDIDATES_PATH
+link_candidates_default_path: Datasets/world_cup_2026_player_link_candidates.csv
+availability_path_env: FIFA_2026_AVAILABILITY_PATH
+player_aliases_path_env: FIFA_2026_PLAYER_ALIASES_PATH
+
+allowed_statuses: [selected, reserve, replacement, withdrawn]
+activity_windows_days: [30, 90, 180, 365]
+expected_rows: 1248
+expected_teams: 48
+expected_players_per_team: 26
+
+position_groups:
+  goalkeeper: [goalkeeper, keeper]
+  defender: [defender, defence, back]
+  midfielder: [midfielder, midfield]
+  forward: [forward, attack, striker, winger]
+
+license: "Official FIFA/federation squad publications; per-source terms"
+attribution: "Official FIFA World Cup 2026 squad source"

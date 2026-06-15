@@ -41,3 +41,14 @@ For any player feature at match date T: build it only from
 `*.date < T` rows of dated tables; flag missing coverage explicitly (never
 zero-fill); never read a `current_*` field. Imputers, if any, fit on training
 folds only.
+
+## Squad Activity Extraction
+
+Squad-linked activity uses only dated `appearances`, `game_lineups`, and
+`player_valuations` rows strictly before an explicit prediction cutoff. The
+target game can be excluded by ID. Missing minutes remain missing unless the
+source records an actual zero-minute appearance. Club and national-team
+activity are kept separate.
+
+Current club, caps, current valuation, latest squad number, current club total
+value, and current FIFA ranking are never substituted for missing history.

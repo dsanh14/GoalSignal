@@ -36,6 +36,15 @@ only in a git-ignored `.env`. See [docs/enrichment_coverage.md](docs/enrichment_
 [docs/player_data.md](docs/player_data.md), and
 [docs/api_football.md](docs/api_football.md).
 
+The squad-data milestone is also implemented: official squad CSV validation,
+content manifests, deterministic Transfermarkt player linkage, cutoff-safe club
+activity and valuation extraction, national-team lineup coverage, descriptive
+squad aggregates, and readiness reports. No squad-aware model is trained.
+The real snapshot contains 1,248 players across 48 teams and reconciles fully
+to the expanded official extract. Conservative Transfermarkt linkage resolves
+936 players (75.0%), so squad-aware model training remains blocked; see
+[docs/squad_data.md](docs/squad_data.md).
+
 ## Data
 
 The historical dataset is **provided by the user** and is never downloaded or
@@ -68,6 +77,9 @@ uv run goalsignal ratings build       # Elo timeline + final ratings
 uv run goalsignal ratings inspect     # current top-rated teams
 uv run goalsignal evaluate rolling    # 2010-2025 expanding-window backtest
 uv run goalsignal tournament simulate # 100k-sim 2026 WC group stage
+uv run goalsignal squads inspect
+uv run goalsignal squads coverage
+uv run goalsignal squads readiness
 uv run goalsignal fifa-current validate
 uv run goalsignal fifa-current compare-elo
 uv run goalsignal results verify

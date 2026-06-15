@@ -15,10 +15,19 @@ from goalsignal.data.sources.config import PlayerFeaturesConfig
 
 
 def normalize_player_name(name: str) -> str:
-    """Casefold and strip accents for comparison (display name kept elsewhere)."""
+    """Normalize for candidate matching while preserving the raw display name."""
+    name = str(name or "").strip()
+    if "," in name:
+        parts = [part.strip() for part in name.split(",", maxsplit=1)]
+        if all(parts):
+            name = f"{parts[1]} {parts[0]}"
     decomposed = unicodedata.normalize("NFKD", name)
     stripped = "".join(c for c in decomposed if not unicodedata.combining(c))
-    return " ".join(stripped.casefold().split())
+    punctuation_as_space = "".join(
+        " " if unicodedata.category(char).startswith("P") else char
+        for char in stripped
+    )
+    return " ".join(punctuation_as_space.casefold().split())
 
 
 def resolve_player(query: dict, candidates: list[dict], source: str) -> dict:

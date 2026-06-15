@@ -52,6 +52,9 @@ goalsignal player-data inventory          # rows/cols/dtypes/nulls per table
 goalsignal player-data temporal-audit     # field-level temporal classification
 goalsignal player-data coverage           # full audit + coverage reports
 goalsignal player-data identity-candidates  # entity-linking scaffolding (no auto-match)
+goalsignal player-data activity --cutoff 2026-06-15
+goalsignal player-data valuations --cutoff 2026-06-15
+goalsignal player-data lineup-coverage
 ```
 
 Reports: `transfermarkt_table_inventory.json`,
@@ -63,3 +66,14 @@ Reports: `transfermarkt_table_inventory.json`,
 
 Transfermarkt-derived; non-commercial research use. **Verify Transfermarkt
 terms before redistribution. Do not scrape.** Attribution recorded in config.
+
+## Squad-Aware Use
+
+Transfermarkt activity is joined only after an official squad file is supplied
+and players are linked with corroborating identity evidence. Dated
+appearances, starts, minutes, events, and valuations are source-level
+observations; they are not an expected XI or a validated strength score.
+
+Club lineups are never treated as national-team lineups. The local export's
+international coverage is measured separately and classified as strong,
+partial, sparse, or unavailable.

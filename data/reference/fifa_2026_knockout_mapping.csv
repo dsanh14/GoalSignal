@@ -1,0 +1,33 @@
+match_number,round,date,time_et,host_city
+73,round_of_32,2026-06-28,15:00,Los Angeles
+74,round_of_32,2026-06-29,16:30,Boston
+75,round_of_32,2026-06-29,21:00,Monterrey
+76,round_of_32,2026-06-29,13:00,Houston
+77,round_of_32,2026-06-30,17:00,New York New Jersey
+78,round_of_32,2026-06-30,13:00,Dallas
+79,round_of_32,2026-06-30,21:00,Mexico City
+80,round_of_32,2026-07-01,12:00,Atlanta
+81,round_of_32,2026-07-01,20:00,San Francisco Bay Area
+82,round_of_32,2026-07-01,16:00,Seattle
+83,round_of_32,2026-07-02,19:00,Toronto
+84,round_of_32,2026-07-02,15:00,Los Angeles
+85,round_of_32,2026-07-02,23:00,Vancouver
+86,round_of_32,2026-07-03,18:00,Miami
+87,round_of_32,2026-07-03,21:30,Kansas City
+88,round_of_32,2026-07-03,14:00,Dallas
+89,round_of_16,2026-07-04,17:00,Philadelphia
+90,round_of_16,2026-07-04,13:00,Houston
+91,round_of_16,2026-07-05,16:00,New York New Jersey
+92,round_of_16,2026-07-05,20:00,Mexico City
+93,round_of_16,2026-07-06,15:00,Dallas
+94,round_of_16,2026-07-06,20:00,Seattle
+95,round_of_16,2026-07-07,12:00,Atlanta
+96,round_of_16,2026-07-07,16:00,Vancouver
+97,quarterfinal,2026-07-09,16:00,Boston
+98,quarterfinal,2026-07-10,15:00,Los Angeles
+99,quarterfinal,2026-07-11,17:00,Miami
+100,quarterfinal,2026-07-11,21:00,Kansas City
+101,semifinal,2026-07-14,15:00,Dallas
+102,semifinal,2026-07-15,15:00,Atlanta
+103,third_place,2026-07-18,17:00,Miami
+104,final,2026-07-19,15:00,New York New Jersey

@@ -11,11 +11,17 @@ from goalsignal.utils.hashing import sha256_json
 from goalsignal.utils.paths import resolve
 
 
-def simulation_version(result_hash: str, model_version: str, snapshot_id: str | None) -> str:
+def simulation_version(
+    result_hash: str,
+    model_version: str,
+    snapshot_id: str | None,
+    bracket_hash: str | None = None,
+) -> str:
     return sha256_json({
         "result_store_hash": result_hash,
         "model_version": model_version,
         "fifa_snapshot_id": snapshot_id,
+        "bracket_hash": bracket_hash,
     })[:16]
 
 

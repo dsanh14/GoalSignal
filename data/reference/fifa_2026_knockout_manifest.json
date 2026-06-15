@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "retrieved_at": "2026-06-14T08:26:24+00:00",
+  "extraction_review_status": "manually_cross_checked_against_official_pdfs",
+  "sources": [
+    {
+      "title": "Regulations for the FIFA World Cup 2026",
+      "publication_version": "May 2026",
+      "url": "https://digitalhub.fifa.com/asset/73f73fe3-235a-4f54-b252-b53d3d580ec5/FWC2026_regulations_EN.pdf",
+      "local_path": "data/reference/FWC2026_regulations_EN.pdf",
+      "sha256": "bad4ea83cf1f51055598b0c12c3dab280a78777e08a623b9e9098508b4ecc8d9"
+    },
+    {
+      "title": "FIFA World Cup 2026 Match Schedule",
+      "publication_version": "Published 2026-06-03",
+      "url": "https://digitalhub.fifa.com/asset/4b5d4417-3343-4732-9cdf-14b6662af407/FWC26-Match-Schedule_English.pdf",
+      "local_path": "data/reference/FWC26-Match-Schedule_English.pdf",
+      "sha256": "4becd057fdbfc63452d59bf29b3df8da5512368f88d3abf7054d64a7ff8768a1"
+    }
+  ],
+  "outputs": {
+    "data/reference/fifa_2026_third_place_combinations.csv": {
+      "rows": 495,
+      "sha256": "97661f6dee6cd07a6fc2b28fab1d99c6dcc7b95bde62fbb72d632b1fd6daa0bf"
+    },
+    "data/reference/fifa_2026_knockout_mapping.csv": {
+      "rows": 32,
+      "sha256": "489813e9e69ba9d2c54bc497bb340524bcbd5eadb05834851db1eca2f92b64d3"
+    }
+  }
+}

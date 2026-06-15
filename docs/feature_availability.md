@@ -78,3 +78,14 @@ Every D1 feature carries an explicit availability/missingness indicator
 are median-imputed fold-locally with the indicator preserved. FIFA coverage ends
 2024-09-19 → 2026 fixtures are FIFA-unavailable and fall back to native features.
 See `docs/enrichment_features.md`.
+
+## Squad And Player Inputs
+
+Squad membership is available from its official source publication timestamp,
+not from the retrieval timestamp or tournament start. A squad snapshot
+published after a prediction cutoff is rejected.
+
+Player activity and valuations use rows strictly before the cutoff. Expected-XI
+inputs retain explicit source-availability flags and leave starter probability
+missing until an estimator has passed chronological evaluation. Availability
+records remain separate from membership.

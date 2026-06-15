@@ -1,0 +1,42 @@
+schema_version: 1
+tournament: FIFA World Cup 2026
+groups: [A, B, C, D, E, F, G, H, I, J, K, L]
+third_place_table: data/reference/fifa_2026_third_place_combinations.csv
+match_mapping: data/reference/fifa_2026_knockout_mapping.csv
+source_manifest: data/reference/fifa_2026_knockout_manifest.json
+
+round_of_32:
+  73: [2A, 2B]
+  74: [1E, THIRD]
+  75: [1F, 2C]
+  76: [1C, 2F]
+  77: [1I, THIRD]
+  78: [2E, 2I]
+  79: [1A, THIRD]
+  80: [1L, THIRD]
+  81: [1D, THIRD]
+  82: [1G, THIRD]
+  83: [2K, 2L]
+  84: [1H, 2J]
+  85: [1B, THIRD]
+  86: [1J, 2H]
+  87: [1K, THIRD]
+  88: [2D, 2G]
+
+advancement:
+  89: [W74, W77]
+  90: [W73, W75]
+  91: [W76, W78]
+  92: [W79, W80]
+  93: [W83, W84]
+  94: [W81, W82]
+  95: [W86, W88]
+  96: [W85, W87]
+  97: [W89, W90]
+  98: [W93, W94]
+  99: [W91, W92]
+  100: [W95, W96]
+  101: [W97, W98]
+  102: [W99, W100]
+  103: [L101, L102]
+  104: [W101, W102]

@@ -55,6 +55,19 @@ milestone must add its own tests against them.
 - Ledger: predictions are hash-chained and append-only; retroactive edits
   fail `goalsignal ledger verify` (tamper tests in `tests/unit/test_ledger.py`).
 
+## Squad And Player Data
+
+- Official squad rows cannot be used before `source_publication_date`.
+- Player activity windows require `event_date < prediction_cutoff`; the target
+  game is explicitly excludable.
+- Historical valuations use the latest dated observation strictly before the
+  cutoff. Missing valuation is never zero.
+- Current club, caps, current valuation, club total value, current FIFA rank,
+  and season-final outcomes are prohibited historical inputs.
+- Club and national-team lineup histories remain separate.
+- Expected starter probabilities remain missing until a fitted estimator is
+  evaluated chronologically.
+
 ## D1 feature engineering (Milestone D1)
 
 The D1 feature builder (`features/d1.py`) enforces leakage safety structurally:
