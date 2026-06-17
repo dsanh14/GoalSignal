@@ -18,8 +18,9 @@ foundation, Elo ratings, chronological backtesting with baselines, Poisson and
 Dixon-Coles goal models, calibration, ensemble, Monte Carlo group-stage
 and official FIFA knockout simulation of the real 2026 fixtures, and a
 hash-chained prediction ledger holding immutable World Cup forecasts.
-The real 1,248-row squad source is ingested and reconciled, but 75.0% identity
-coverage is insufficient for squad-aware model training.
+The real 1,248-row squad source is ingested and reconciled. Reviewed aliases
+raise identity coverage to 1,233/1,248 (98.8%): 1,170 locally linkable, 63
+accepted web-only, and 15 material conflicts. No squad model is trained.
 Ruff and the current test suite must pass before changes finish.
 
 **Not complete:** the full original roadmap. The live-update milestone now
@@ -47,7 +48,7 @@ describe the project as finished.
 | 13. Continuous learning (result record, drift, champion–challenger) | PARTIAL | `feedback/` + `goalsignal result record|correct`, `feedback match|summary` (append-only result store, post-match scoring, Elo online updates, future-only refresh under `ensemble-v1+rN`); drift + champion–challenger open |
 | 14. Prediction ledger | DONE (M7) | `ledger/storage.py`, `goalsignal ledger *` |
 | 15. API / dashboard / release audit | OPEN | research report done (M8: `docs/research_report.md`) |
-| 16. Enrichment layer (players/lineups/StatsBomb/FIFA/rest/travel) | IN PROGRESS — contracts, ingestion, D1, real squad ingestion/link audit done | `data/sources/squads.py`, `config/squads.yaml`, `goalsignal squads *`; 936/1,248 deterministic links, no squad model trained |
+| 16. Enrichment layer (players/lineups/StatsBomb/FIFA/rest/travel) | IN PROGRESS — contracts, ingestion, D1, real squad ingestion/reviewed-link audit done | `data/sources/squads.py`, `config/squads.yaml`, `goalsignal squads *`; 1,233/1,248 identities, 1,170 locally linkable, no squad model trained |
 
 ### Verified deployment snapshot (from manifests — do not edit by hand)
 
@@ -309,9 +310,29 @@ Local datasets in `Datasets/` were audited (read-only). Reports in
   not configured; API-Football 2026 lineups remain plan-locked.
 - The repository-default snapshot validates at 1,248 rows, 48 teams, and 26
   players per team; the official extract reconciles 100%.
-- Identity resolution links 936/1,248 players (75.0%); Portugal remains 0/26
-  under the conservative evidence rules.
+- Reviewed identity resolution links 1,233/1,248 players (98.8%): 1,170 local,
+  63 web-only, and 15 conflicts. Portugal is 26/26 accepted-local.
+- Dated activity has 488/1,248 with 30-day minutes and 647/1,248 with 90-day
+  minutes. Historical valuations cover 838/1,248 players.
 - No model is trained, and forecasts/ledgers are untouched by this milestone.
+
+### 2026 squad scenario challenger (2026-06-15)
+
+- Added a configuration-driven, offline S1-S7 squad sensitivity analysis.
+  S7 combines cutoff-safe activity, starts, historical valuation, positional,
+  goalkeeper, and depth proxies with coverage shrinkage and bounded
+  expected-goal adjustments.
+- This is **not a trained model and is not deployed**. The live team-level
+  model remains champion; 20 teams pass coverage thresholds and 28 receive
+  exact base fallback.
+- The verified research run used 100,000 simulations and seed `20260612`.
+  Portugal ranked fifth in squad strength and moved from 4.195% to 4.871%
+  title probability. The modal final was Spain-Argentina; Spain remained the
+  modal champion.
+- Outputs are versioned under `artifacts/features/squad_2026/`,
+  `artifacts/research_predictions/`, and `artifacts/simulations/squad-*`.
+  Production predictions, result history, and the default tournament command
+  remain unchanged.
 
 ### Milestone D1 — leakage-safe feature engineering + ablation (offline)
 
@@ -362,20 +383,22 @@ appears: `ls -lO .venv/lib/python3.12/site-packages/*.pth` and
 
 ## Open work (priority order)
 
-1. **Official 2026 squad CSV** — provide `FIFA_2026_SQUADS_PATH` using
-   `data/reference/world_cup_2026_squads_template.csv`, then run squad
-   validation, linkage, activity, Portugal, and readiness audits.
-2. **Form / venue / travel / rest / head-to-head features** — the next
+1. **Resolve the 15 reviewed/local identity conflicts** — verify DOB/name
+   disagreements against authoritative sources without weakening safeguards.
+2. **Squad-feature chronological ablation** — evaluate cutoff-safe local
+   activity/valuation proxies against the ensemble champion; do not deploy
+   before an honest paired result.
+3. **Form / venue / travel / rest / head-to-head features** — the next
    plausible accuracy gain (research report H8: new information, not new
    model classes).
-3. **Ablation suite + regime analysis** — hypotheses H1, H2, H4, H5, H6, H9,
+4. **Ablation suite + regime analysis** — hypotheses H1, H2, H4, H5, H6, H9,
    H10 are recorded but untested.
-4. **Result recording + live feedback** — `result record`, post-match scoring
+5. **Result recording + live feedback** — `result record`, post-match scoring
    of frozen ledger entries, online state updates.
-5. **Drift monitoring + champion–challenger** — `feedback *` and `model *`
+6. **Drift monitoring + champion–challenger** — `feedback *` and `model *`
    command families.
-6. **Optional API / dashboard** — keep dependencies optional.
-7. **Release audit** — decide which evidence artifacts to publish; final
+7. **Optional API / dashboard** — keep dependencies optional.
+8. **Release audit** — decide which evidence artifacts to publish; final
    reproducibility pass.
 
 ## Milestone workflow

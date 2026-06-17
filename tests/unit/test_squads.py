@@ -16,10 +16,12 @@ from goalsignal.data.sources.squads import (
     build_player_activity,
     link_squad_players,
     load_official_extract,
+    load_reviewed_aliases,
     load_seed_link_candidates,
     load_squads,
     position_group,
     reconcile_official_extract,
+    revalidate_reviewed_aliases,
     revalidate_seed_links,
 )
 
@@ -174,15 +176,14 @@ def test_reviewed_alias_precedes_other_matches(tmp_path):
         [
             {
                 "national_team": "Portugal",
-                "squad_player_name": "João Teste",
+                "official_player_name": "João Teste",
                 "transfermarkt_player_id": "22",
-                "review_status": "reviewed",
-                "notes": "human reviewed",
+                "classification": "accepted_local",
             }
         ]
     )
     links = link_squad_players(squads.iloc[[0]], _players(), aliases)
-    assert links.iloc[0]["match_method"] == "reviewed_alias"
+    assert links.iloc[0]["match_method"] == "reviewed_alias_local"
     assert links.iloc[0]["transfermarkt_player_id"] == "22"
 
 
@@ -274,9 +275,112 @@ def _links():
                 "player_name": "Player",
                 "canonical_player_id": "tm:10",
                 "transfermarkt_player_id": "10",
+                "reviewed_transfermarkt_player_id": "",
+                "local_snapshot_available": True,
+                "identity_status": "deterministic_local",
             }
         ]
     )
+
+
+def _review_aliases():
+    common = {
+        "date_of_birth": "",
+        "official_club": "FC Example",
+        "match_evidence": "human-reviewed identity",
+        "review_status": "accepted",
+        "reviewer": "Reviewer",
+        "reviewed_at": "2026-06-15",
+        "notes": "Reviewed against official source.",
+    }
+    return pd.DataFrame(
+        [
+            {
+                **common,
+                "national_team": "Portugal",
+                "official_squad_player_name": "João Teste",
+                "candidate_transfermarkt_player_id": "10.0",
+                "transfermarkt_name": "Joao Teste",
+            },
+            {
+                **common,
+                "national_team": "Portugal",
+                "official_squad_player_name": "Rui Keeper",
+                "candidate_transfermarkt_player_id": "999.0",
+                "transfermarkt_name": "Rui Keeper",
+            },
+        ]
+    )
+
+
+def test_reviewed_alias_local_and_web_only_classification(tmp_path):
+    squads, _, _ = load_squads(
+        _write_squads(tmp_path), canonical_teams={"Portugal"}
+    )
+    report, summary = revalidate_reviewed_aliases(
+        squads, _review_aliases(), _players(), expected_rows=2
+    )
+    assert summary["accepted_local"] == 1
+    assert summary["accepted_web_only"] == 1
+    assert set(report["classification"]) == {
+        "accepted_local",
+        "accepted_web_only",
+    }
+
+
+def test_reviewed_aliases_can_be_disabled():
+    report, summary = revalidate_reviewed_aliases(
+        pd.DataFrame(), load_reviewed_aliases(None), _players()
+    )
+    assert report.empty
+    assert summary["total"] == 0
+
+
+def test_reviewed_alias_conflict_and_duplicate_detection(tmp_path):
+    squads, _, _ = load_squads(
+        _write_squads(tmp_path), canonical_teams={"Portugal"}
+    )
+    conflict = _review_aliases().iloc[[0]].copy()
+    conflict["candidate_transfermarkt_player_id"] = "22"
+    conflict["transfermarkt_name"] = "Joao Teste"
+    report, _ = revalidate_reviewed_aliases(squads.iloc[[0]], conflict, _players())
+    assert report.iloc[0]["classification"] == "conflict"
+
+    duplicated = _review_aliases()
+    duplicated["candidate_transfermarkt_player_id"] = "10"
+    report, summary = revalidate_reviewed_aliases(squads, duplicated, _players())
+    assert summary["duplicate_local_id"] == 2
+    assert set(report["classification"]) == {"duplicate_local_id"}
+
+
+def test_web_only_identity_has_no_activity_or_valuation():
+    links = _links()
+    links.loc[0, "transfermarkt_player_id"] = ""
+    links.loc[0, "reviewed_transfermarkt_player_id"] = "999"
+    links.loc[0, "local_snapshot_available"] = False
+    links.loc[0, "identity_status"] = "accepted_web_only"
+    activity = build_player_activity(
+        links,
+        pd.DataFrame(
+            columns=[
+                "game_id", "player_id", "date", "minutes_played", "goals",
+                "assists", "yellow_cards", "red_cards",
+            ]
+        ),
+        pd.DataFrame(columns=["game_id", "player_id", "date", "type"]),
+        cutoff="2026-06-15",
+    ).iloc[0]
+    assert pd.isna(activity["minutes_90d"])
+    assert pd.isna(activity["starts_90d"])
+    values = build_historical_valuations(
+        links,
+        pd.DataFrame(columns=["player_id", "date", "market_value_in_eur"]),
+        cutoff="2026-06-15",
+        source_snapshot_id="snap",
+    ).iloc[0]
+    assert bool(values["local_snapshot_available"]) is False
+    assert bool(values["available"]) is False
+    assert pd.isna(values["historical_valuation"])
 
 
 def test_activity_windows_cutoff_target_and_missing_minutes():

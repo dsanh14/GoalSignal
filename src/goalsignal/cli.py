@@ -1727,6 +1727,10 @@ playerdata_app = typer.Typer(help="Transfermarkt-derived player/club audit (read
 app.add_typer(playerdata_app, name="player-data")
 squads_app = typer.Typer(help="Official 2026 squad ingestion and player-data readiness.")
 app.add_typer(squads_app, name="squads")
+squad_model_app = typer.Typer(
+    help="Offline 2026 squad-strength scenario challenger (research only)."
+)
+app.add_typer(squad_model_app, name="squad-model")
 
 
 def _player_source():
@@ -1736,12 +1740,11 @@ def _player_source():
 
 
 def _squad_source_inputs():
-    import os
-
     from goalsignal.data.sources.config import SquadDataConfig
     from goalsignal.data.sources.squads import (
         load_reviewed_aliases,
         load_squads,
+        resolve_optional_reference_path,
         resolve_squad_path,
     )
 
@@ -1752,7 +1755,10 @@ def _squad_source_inputs():
     squads, manifest, quality = load_squads(
         path, canonical_teams=canonical, config=config
     )
-    aliases = load_reviewed_aliases(os.environ.get(config.player_aliases_path_env))
+    alias_path = resolve_optional_reference_path(
+        config.player_aliases_path_env, config.player_aliases_default_path
+    )
+    aliases = load_reviewed_aliases(alias_path)
     return config, path, squads, manifest, quality, aliases
 
 
@@ -1761,13 +1767,22 @@ def _squad_links():
         link_squad_players,
         load_seed_link_candidates,
         resolve_optional_reference_path,
+        revalidate_reviewed_aliases,
         revalidate_seed_links,
+        write_alias_revalidation_reports,
         write_seed_link_reports,
     )
 
     config, path, squads, manifest, quality, aliases = _squad_source_inputs()
     source = _player_source()
     players = source.read_table("players")
+    alias_report, alias_summary = revalidate_reviewed_aliases(
+        squads,
+        aliases,
+        players,
+        expected_rows=config.expected_alias_rows,
+    )
+    write_alias_revalidation_reports(alias_report, alias_summary)
     candidate_path = resolve_optional_reference_path(
         config.link_candidates_path_env, config.link_candidates_default_path
     )
@@ -1776,8 +1791,9 @@ def _squad_links():
     candidates = load_seed_link_candidates(candidate_path)
     seed_report, seed_summary = revalidate_seed_links(squads, candidates, players)
     write_seed_link_reports(seed_report, seed_summary)
-    links = link_squad_players(squads, players, aliases, seed_report)
+    links = link_squad_players(squads, players, alias_report, seed_report)
     links.attrs["seed_summary"] = seed_summary
+    links.attrs["alias_summary"] = alias_summary
     links.attrs["players"] = players
     return config, path, squads, manifest, quality, source, links
 
@@ -1823,6 +1839,7 @@ def squads_inspect() -> None:
             config.squads_path_env: config.squads_default_path,
             config.official_extract_path_env: config.official_extract_default_path,
             config.link_candidates_path_env: config.link_candidates_default_path,
+            config.player_aliases_path_env: config.player_aliases_default_path,
         }.get(env_name, "")
         configured = raw or default or "not configured"
         typer.echo(f"{label:18s} {configured} ({env_name})")
@@ -1941,17 +1958,15 @@ def squads_link_players() -> None:
     """Link official squad players to Transfermarkt with deterministic evidence."""
     from goalsignal.data.sources.squads import (
         SquadDataUnavailable,
-        write_alias_review_file,
         write_link_reports,
     )
 
     try:
-        _config, _path, squads, _manifest, _quality, _source, links = _squad_links()
+        _config, _path, _squads, _manifest, _quality, _source, links = _squad_links()
     except SquadDataUnavailable as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from None
     summary = write_link_reports(links)
-    alias_path = write_alias_review_file(squads, links, links.attrs["players"])
     typer.echo(
         f"Player links: {summary['linked']}/{summary['total']} "
         f"({summary['link_rate']:.1%}); by class={summary['by_class']}"
@@ -1959,7 +1974,7 @@ def squads_link_players() -> None:
     typer.echo("Reports: artifacts/reports/squad_player_*.csv|json")
     typer.echo(
         f"Accepted seed links: {links.attrs['seed_summary']['accepted_deterministic']}; "
-        f"manual review: {alias_path}"
+        f"reviewed aliases={links.attrs['alias_summary']}"
     )
 
 
@@ -2020,8 +2035,16 @@ def _activity_outputs(cutoff: str, force: bool):
                     "dimension": dimension,
                     "value": value,
                     "players": len(block),
+                    "identity_available": int(
+                        block["canonical_player_id"].fillna("").ne("").sum()
+                    ),
+                    "local_snapshot_available": int(
+                        block["local_snapshot_available"].fillna(False).sum()
+                    ),
                     "minutes_30d_available": int(block["minutes_30d"].notna().sum()),
                     "minutes_90d_available": int(block["minutes_90d"].notna().sum()),
+                    "minutes_180d_available": int(block["minutes_180d"].notna().sum()),
+                    "minutes_365d_available": int(block["minutes_365d"].notna().sum()),
                     "starts_90d_available": int(block["starts_90d"].notna().sum()),
                     "cutoff": cutoff,
                 }
@@ -2057,8 +2080,21 @@ def _activity_outputs(cutoff: str, force: bool):
                     "dimension": dimension,
                     "value": value,
                     "players": len(block),
+                    "local_snapshot_available": int(
+                        block["local_snapshot_available"].fillna(False).sum()
+                    ),
                     "available": int(block["available"].sum()),
                     "coverage": float(block["available"].mean()),
+                    "coverage_among_local": (
+                        float(
+                            block.loc[
+                                block["local_snapshot_available"].fillna(False),
+                                "available",
+                            ].mean()
+                        )
+                        if block["local_snapshot_available"].fillna(False).any()
+                        else None
+                    ),
                     "median_valuation_age_days": ages.median(),
                     "stale_over_365_days": int(ages.gt(365).sum()),
                     "cutoff": cutoff,
@@ -2068,7 +2104,15 @@ def _activity_outputs(cutoff: str, force: bool):
         reports / "player_valuation_coverage.csv", index=False
     )
     valuations[
-        ["national_team", "player_name", "valuation_date", "valuation_age_days", "available"]
+        [
+            "national_team",
+            "player_name",
+            "identity_status",
+            "local_snapshot_available",
+            "valuation_date",
+            "valuation_age_days",
+            "available",
+        ]
     ].to_csv(reports / "player_valuation_age.csv", index=False)
     return activity, valuations, links, activity_path, valuation_path
 
@@ -2108,6 +2152,16 @@ def squads_activity(
     ].copy()
     portugal.to_csv(reports / "portugal_squad_activity.csv", index=False)
     linked = int(portugal["canonical_player_id"].fillna("").ne("").sum()) if len(portugal) else 0
+    accepted_local = int(
+        portugal.get("local_snapshot_available", pd.Series(dtype=bool))
+        .fillna(False)
+        .sum()
+    )
+    accepted_web_only = int(
+        portugal.get("identity_status", pd.Series(dtype=str))
+        .eq("accepted_web_only")
+        .sum()
+    )
     minutes_cov = float(portugal.get("minutes_90d", pd.Series(dtype=float)).notna().mean()) \
         if len(portugal) else None
     valuation_cov = float(
@@ -2137,6 +2191,8 @@ def squads_activity(
         "",
         f"- Official squad rows: {len(portugal)}",
         f"- Confident Transfermarkt links: {linked}",
+        f"- Accepted local identities: {accepted_local}",
+        f"- Accepted web-only identities: {accepted_web_only}",
         f"- Recent club-minutes coverage: {minutes_cov}",
         f"- Historical-valuation coverage: {valuation_cov}",
         f"- Ambiguous/unmatched players: {len(portugal) - linked}",
@@ -2193,14 +2249,21 @@ def squads_readiness() -> None:
     _load_env()
     try:
         *_rest, links = _squad_links()
-        accepted = links["match_class"].isin(
-            {"exact", "high-confidence deterministic"}
+        rate = (
+            float(links["canonical_player_id"].fillna("").ne("").mean())
+            if len(links)
+            else None
         )
-        rate = float(accepted.mean()) if len(links) else None
+        local_rate = (
+            float(links["local_snapshot_available"].fillna(False).mean())
+            if len(links)
+            else None
+        )
         squad_available = True
     except SquadDataUnavailable as exc:
         write_missing_source_reports(str(exc))
         rate = None
+        local_rate = None
         squad_available = False
     statsbomb_available = bool(os.environ.get("STATSBOMB_DATA_PATH"))
     statsbomb_report = resolve(
@@ -2229,13 +2292,15 @@ def squads_readiness() -> None:
     readiness = build_feature_readiness(
         squad_available=squad_available,
         identity_link_rate=rate,
+        local_snapshot_rate=local_rate,
         statsbomb_available=statsbomb_available,
         international_lineup_ready=international_ready,
     )
     paths = write_readiness_reports(readiness)
     typer.echo(
         f"Squad source={'available' if squad_available else 'missing'}; "
-        f"identity_link_rate={rate}; reports={paths[0]}, {paths[1]}"
+        f"identity_link_rate={rate}; local_snapshot_rate={local_rate}; "
+        f"reports={paths[0]}, {paths[1]}"
     )
 
 
@@ -2313,6 +2378,771 @@ def playerdata_lineup_coverage() -> None:
     md = resolve("artifacts/reports/national_team_lineup_readiness.md")
     md.write_text("\n".join(lines) + "\n", encoding="utf-8")
     typer.echo(f"National-team lineup coverage: {counts}; reports={out}, {md}")
+
+
+def _squad_challenger_features(force: bool = False):
+    import json
+
+    from goalsignal.data.sources.player_data import PlayerDataSource
+    from goalsignal.tournament.squad_challenger import (
+        SquadChallengerConfig,
+        build_team_squad_features,
+        feature_artifact_version,
+        squad_source_hashes,
+    )
+    from goalsignal.utils.hashing import sha256_file, sha256_json
+
+    _load_env()
+    config = SquadChallengerConfig.load()
+    player_dir = resolve("artifacts/player_data")
+    activity_paths = sorted(player_dir.glob("player_activity_*.csv"))
+    valuation_paths = sorted(player_dir.glob("player_valuations_*.csv"))
+    if len(activity_paths) != 1 or len(valuation_paths) != 1:
+        raise ValueError(
+            "expected exactly one current squad activity and valuation artifact"
+        )
+    activity_path, valuation_path = activity_paths[0], valuation_paths[0]
+    activity = pd.read_csv(activity_path)
+    valuations = pd.read_csv(valuation_path)
+    if set(activity["prediction_cutoff"].astype(str)) != {
+        pd.Timestamp(config.prediction_cutoff).isoformat()
+    }:
+        raise ValueError("squad activity cutoff does not match challenger config")
+    source = PlayerDataSource.resolve_from_env()
+    source_hashes = {
+        **squad_source_hashes(),
+        "activity_artifact": sha256_file(activity_path),
+        "valuation_artifact": sha256_file(valuation_path),
+        "transfermarkt_snapshot": sha256_json(source.file_hashes()),
+    }
+    version = feature_artifact_version(config, source_hashes)
+    out = resolve(Path("artifacts/features/squad_2026") / version)
+    feature_path = out / "team_squad_features.csv"
+    metadata_path = out / "metadata.json"
+    if metadata_path.exists() and not force:
+        return config, pd.read_csv(feature_path), version, feature_path, metadata_path
+    frame = build_team_squad_features(
+        activity, valuations, config, source_hashes=source_hashes
+    )
+    if len(frame) != 48:
+        raise ValueError(f"expected 48 squad feature rows, got {len(frame)}")
+    out.mkdir(parents=True, exist_ok=True)
+    frame.to_csv(feature_path, index=False)
+    metadata = {
+        "research_status": "offline scenario analysis; not trained or deployed",
+        "feature_version": config.feature_version,
+        "config_hash": config.config_hash,
+        "artifact_version": version,
+        "prediction_cutoff": config.prediction_cutoff,
+        "source_hashes": source_hashes,
+        "coverage_thresholds": config.coverage,
+        "eligible_teams": frame.loc[
+            frame["coverage_eligible"], "national_team"
+        ].tolist(),
+        "fallback_teams": frame.loc[
+            ~frame["coverage_eligible"], "national_team"
+        ].tolist(),
+    }
+    metadata_path.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+    reports = resolve("artifacts/reports")
+    reports.mkdir(parents=True, exist_ok=True)
+    coverage_columns = [
+        "national_team",
+        "identity_coverage",
+        "local_activity_coverage",
+        "valuation_coverage",
+        "goalkeeper_local_coverage",
+        "minimum_position_local_coverage",
+        "stale_valuation_proportion",
+        "coverage_confidence",
+        "coverage_eligible",
+        "fallback_used",
+        "log_goal_adjustment",
+    ]
+    frame[coverage_columns].to_csv(
+        reports / "squad_adjustment_coverage.csv", index=False
+    )
+    frame.loc[~frame["coverage_eligible"], coverage_columns].to_csv(
+        reports / "squad_adjustment_fallbacks.csv", index=False
+    )
+    return config, frame, version, feature_path, metadata_path
+
+
+def _squad_tournament_context(features: pd.DataFrame):
+    from goalsignal.feedback.results import active_results
+    from goalsignal.tournament.bracket_2026 import OfficialBracket
+    from goalsignal.tournament.fixtures_2026 import derive_2026_group_stage
+    from goalsignal.tournament.full_simulator import apply_official_group_letters
+    from goalsignal.tournament.model_adapter import RatingsGoalAdapter
+    from goalsignal.tournament.simulator import validate_completed_overlay
+    from goalsignal.tournament.squad_challenger import SquadScenarioAdapter
+
+    matches, live = _live_model(Path("config/data.yaml"), None)
+    groups, fixtures = derive_2026_group_stage(matches)
+    active = active_results()
+    validate_completed_overlay(fixtures, active)
+    fifa = _current_fifa(Path("config/data.yaml"), None)
+    if fifa is None:
+        raise ValueError("FIFA_CURRENT_RANKINGS_PATH is required")
+    fifa_frame, fifa_manifest, _quality = fifa
+    official_groups = {
+        group: list(block["canonical_team"])
+        for group, block in fifa_frame.groupby("group", sort=True)
+    }
+    groups, fixtures = apply_official_group_letters(
+        groups, fixtures, official_groups
+    )
+    base = RatingsGoalAdapter(live.ratings, live.goal_model)
+    challenger = SquadScenarioAdapter(base, features)
+    return (
+        live,
+        groups,
+        fixtures,
+        OfficialBracket.load(),
+        base,
+        challenger,
+        fifa_frame,
+        fifa_manifest,
+    )
+
+
+@squad_model_app.command("build-features")
+def squad_model_build_features(
+    force: Annotated[bool, typer.Option("--force")] = False,
+) -> None:
+    """Build versioned 48-team squad scenario features."""
+    try:
+        config, frame, version, feature_path, metadata_path = (
+            _squad_challenger_features(force)
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        typer.echo(f"Squad feature build failed: {exc}", err=True)
+        raise typer.Exit(code=1) from None
+    typer.echo(
+        f"Research features {version}: {len(frame)} teams; "
+        f"eligible={int(frame['coverage_eligible'].sum())}; "
+        f"fallback={int((~frame['coverage_eligible']).sum())}"
+    )
+    typer.echo(f"Config hash: {config.config_hash}")
+    typer.echo(f"Artifacts: {feature_path}, {metadata_path}")
+
+
+@squad_model_app.command("inspect")
+def squad_model_inspect() -> None:
+    """Show squad ranks, confidence, and bounded adjustments."""
+    _config, frame, version, feature_path, _metadata = _squad_challenger_features()
+    columns = [
+        "national_team",
+        "score_s7_coverage_shrunk",
+        "coverage_confidence",
+        "log_goal_adjustment",
+        "fallback_used",
+    ]
+    typer.echo(f"Squad scenario features: {version} ({feature_path})")
+    typer.echo(
+        frame.sort_values("score_s7_coverage_shrunk", ascending=False)[columns]
+        .head(20)
+        .to_string(index=False)
+    )
+
+
+@squad_model_app.command("predict")
+def squad_model_predict(
+    force: Annotated[bool, typer.Option("--force")] = False,
+) -> None:
+    """Write research-only squad-aware predictions for remaining group fixtures."""
+    import json
+
+    import numpy as np
+
+    from goalsignal.feedback.results import result_store_hash
+    from goalsignal.tournament.squad_challenger import (
+        base_outcome_probabilities,
+    )
+    from goalsignal.utils.hashing import sha256_json
+
+    config, features, feature_version, _path, _metadata = (
+        _squad_challenger_features()
+    )
+    live, _groups, fixtures, bracket, base, challenger, _fifa, fifa_manifest = (
+        _squad_tournament_context(features)
+    )
+    result_hash = result_store_hash()
+    version = sha256_json(
+        {
+            "challenger": config.challenger_version,
+            "feature_version": feature_version,
+            "result_hash": result_hash,
+            "bracket_hash": bracket.config_hash,
+        }
+    )[:16]
+    out = resolve(Path("artifacts/research_predictions") / version)
+    csv_path, metadata_path = out / "remaining_group_matches.csv", out / "metadata.json"
+    if metadata_path.exists() and not force:
+        typer.echo(f"Refusing to overwrite {out}; pass --force.", err=True)
+        raise typer.Exit(code=1)
+    indexed = features.set_index("national_team")
+    rows = []
+    for fixture in fixtures:
+        if fixture.played:
+            continue
+        base_probs = base_outcome_probabilities(
+            base, fixture.home, fixture.away, fixture.neutral
+        )
+        squad_probs = challenger.outcome_probabilities(
+            fixture.home, fixture.away, fixture.neutral
+        )
+        base_lam = base.expected_goals(fixture.home, fixture.away, fixture.neutral)
+        squad_lam = challenger.expected_goals(
+            fixture.home, fixture.away, fixture.neutral
+        )
+        home = indexed.loc[fixture.home]
+        away = indexed.loc[fixture.away]
+        feature_differences = {
+            "diff_activity_score": home["score_activity"] - away["score_activity"],
+            "diff_recent_minutes": home["z_minutes_90d_total"]
+            - away["z_minutes_90d_total"],
+            "diff_recent_starts": home["score_starts"] - away["score_starts"],
+            "diff_goalkeeper_activity": home["score_goalkeeper"]
+            - away["score_goalkeeper"],
+            "diff_defender_activity": home["z_defender_active_90d"]
+            - away["z_defender_active_90d"],
+            "diff_midfielder_activity": home["z_midfielder_active_90d"]
+            - away["z_midfielder_active_90d"],
+            "diff_forward_activity": home["z_forward_active_90d"]
+            - away["z_forward_active_90d"],
+            "diff_valuation": home["score_valuation"] - away["score_valuation"],
+            "diff_top_11_valuation": home["z_valuation_top_11"]
+            - away["z_valuation_top_11"],
+            "diff_top_15_valuation": home["z_valuation_top_15"]
+            - away["z_valuation_top_15"],
+            "diff_top_23_valuation": home["z_valuation_top_23"]
+            - away["z_valuation_top_23"],
+            "diff_depth": home["score_depth"] - away["score_depth"],
+            "diff_inactivity": home["z_inactive_90d"] - away["z_inactive_90d"],
+            "diff_activity_coverage": home["z_local_activity_coverage"]
+            - away["z_local_activity_coverage"],
+            "diff_valuation_coverage": home["z_valuation_coverage"]
+            - away["z_valuation_coverage"],
+        }
+        rows.append(
+            {
+                "fixture_id": fixture.fixture_id,
+                "group": fixture.group,
+                "home_team": fixture.home,
+                "away_team": fixture.away,
+                "base_home_win": base_probs[0],
+                "base_draw": base_probs[1],
+                "base_away_win": base_probs[2],
+                "squad_home_win": squad_probs[0],
+                "squad_draw": squad_probs[1],
+                "squad_away_win": squad_probs[2],
+                "max_absolute_change": float(
+                    np.max(np.abs(squad_probs - base_probs))
+                ),
+                "base_home_xg": base_lam[0],
+                "base_away_xg": base_lam[1],
+                "squad_home_xg": squad_lam[0],
+                "squad_away_xg": squad_lam[1],
+                "home_coverage_confidence": home["coverage_confidence"],
+                "away_coverage_confidence": away["coverage_confidence"],
+                "fallback_used": bool(
+                    home["fallback_used"] or away["fallback_used"]
+                ),
+                "feature_version": feature_version,
+                "challenger_version": config.challenger_version,
+                "prediction_cutoff": config.prediction_cutoff,
+                "result_store_hash": result_hash,
+                **feature_differences,
+            }
+        )
+    frame = pd.DataFrame(rows)
+    out.mkdir(parents=True, exist_ok=True)
+    frame.to_csv(csv_path, index=False)
+    metadata = {
+        "research_status": "scenario analysis; not trained or deployed",
+        "current_world_cup_results_used_as_labels": False,
+        "completed_fixtures_excluded": len(fixtures) - len(frame),
+        "remaining_fixture_count": len(frame),
+        "feature_version": feature_version,
+        "challenger_version": config.challenger_version,
+        "config_hash": config.config_hash,
+        "model_version": live.model_version,
+        "result_store_hash": result_hash,
+        "official_bracket_hash": bracket.config_hash,
+        "official_bracket_manifest": bracket.source_manifest,
+        "fifa_snapshot_id": fifa_manifest["snapshot_id"],
+    }
+    metadata_path.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+    typer.echo(f"Research predictions: {len(frame)} remaining fixtures -> {csv_path}")
+    typer.echo(f"Metadata: {metadata_path}")
+
+
+def _markdown_table(frame: pd.DataFrame, title: str, note: str = "") -> str:
+    headers = list(frame.columns)
+    lines = [
+        f"# {title}",
+        "",
+        note,
+        "",
+        "| " + " | ".join(headers) + " |",
+        "| " + " | ".join("---" for _ in headers) + " |",
+    ]
+    for row in frame.itertuples(index=False, name=None):
+        lines.append("| " + " | ".join(str(value) for value in row) + " |")
+    return "\n".join(lines) + "\n"
+
+
+def _current_base_simulation(result_hash: str) -> tuple[Path, pd.DataFrame, dict]:
+    import json
+
+    matches = []
+    for meta_path in resolve("artifacts/simulations").glob(
+        "*/wc2026_tournament_meta.json"
+    ):
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        if (
+            meta.get("result_store_hash") == result_hash
+            and meta.get("n_sims") == 100_000
+            and "simulation_version" in meta
+            and "challenger_version" not in meta
+        ):
+            matches.append((meta_path.stat().st_mtime, meta_path, meta))
+    if not matches:
+        raise ValueError("no verified 100,000-simulation base artifact for result store")
+    _mtime, meta_path, meta = max(matches)
+    advancement = pd.read_csv(meta_path.parent / "wc2026_team_advancement.csv")
+    return meta_path.parent, advancement, meta
+
+
+def _write_squad_research_reports(
+    result,
+    base_advancement: pd.DataFrame,
+    features: pd.DataFrame,
+    config,
+    predictions: pd.DataFrame,
+    live,
+) -> list[Path]:
+    import numpy as np
+
+    from goalsignal.tournament.reporting import advancement_frame
+
+    reports = resolve("artifacts/reports")
+    reports.mkdir(parents=True, exist_ok=True)
+    challenger = advancement_frame(result)
+    base = base_advancement.rename(
+        columns={column: f"base_{column}" for column in base_advancement if column != "team"}
+    )
+    compare = challenger.merge(base, on="team", how="left")
+    for stage in (
+        "round_of_32",
+        "round_of_16",
+        "quarterfinal",
+        "semifinal",
+        "final",
+        "champion",
+    ):
+        compare[f"delta_{stage}"] = (
+            compare[f"p_{stage}"] - compare[f"base_p_{stage}"]
+        )
+    feature_lookup = features.set_index("national_team")
+    compare["fallback_used"] = compare["team"].map(
+        feature_lookup["fallback_used"]
+    )
+    compare["change_interpretation"] = (
+        "scenario change; squad and bracket effects are not causally separated"
+    )
+    compare_path = reports / "base_vs_squad_advancement.csv"
+    compare.to_csv(compare_path, index=False)
+    largest = pd.concat(
+        [
+            compare.nlargest(8, "delta_champion"),
+            compare.nsmallest(8, "delta_champion"),
+        ]
+    ).drop_duplicates("team")
+    compare_md = reports / "base_vs_squad_advancement.md"
+    compare_md.write_text(
+        _markdown_table(
+            largest[
+                [
+                    "team",
+                    "base_p_champion",
+                    "p_champion",
+                    "delta_champion",
+                    "fallback_used",
+                ]
+            ],
+            "Base vs Squad Scenario Advancement",
+            "Differences are scenario changes, not validated predictive improvements.",
+        ),
+        encoding="utf-8",
+    )
+
+    ratings = pd.Series(live.ratings, name="rating")
+    rating_rank = ratings.rank(ascending=False, method="min")
+    squad_rank = feature_lookup["score_s7_coverage_shrunk"].rank(
+        ascending=False, method="min"
+    )
+    r32_expected_elo = {}
+    for team in result.teams:
+        weighted = total = 0.0
+        for number in range(73, 89):
+            for pair, count in result.matchup_counts[number].items():
+                if team in pair:
+                    opponent = pair[1] if pair[0] == team else pair[0]
+                    weighted += count * live.ratings.get(opponent, 1500.0)
+                    total += count
+        r32_expected_elo[team] = weighted / total if total else np.nan
+    path_rank = pd.Series(r32_expected_elo).rank(ascending=True, method="min")
+    contender = compare[
+        compare["team"].isin(config.contender_report_teams)
+    ].copy()
+    contender["relative_title_change"] = (
+        contender["delta_champion"] / contender["base_p_champion"].replace(0, np.nan)
+    )
+    contender["squad_strength_rank"] = contender["team"].map(squad_rank)
+    contender["base_team_strength_rank"] = contender["team"].map(rating_rank)
+    contender["path_difficulty_rank"] = contender["team"].map(path_rank)
+    contender["coverage_confidence"] = contender["team"].map(
+        feature_lookup["coverage_confidence"]
+    )
+    contender = contender.rename(
+        columns={
+            "base_p_champion": "base_title_probability",
+            "p_champion": "squad_title_probability",
+            "delta_champion": "absolute_change",
+        }
+    )
+    contender_columns = [
+        "team",
+        "base_title_probability",
+        "squad_title_probability",
+        "absolute_change",
+        "relative_title_change",
+        "squad_strength_rank",
+        "base_team_strength_rank",
+        "path_difficulty_rank",
+        "coverage_confidence",
+        "fallback_used",
+    ]
+    contender = contender[contender_columns].sort_values(
+        "squad_title_probability", ascending=False
+    )
+    contender_csv = reports / "squad_contender_comparison.csv"
+    contender_md = reports / "squad_contender_comparison.md"
+    contender.to_csv(contender_csv, index=False)
+    contender_md.write_text(
+        _markdown_table(
+            contender,
+            "Squad Scenario Contender Comparison",
+            "Path rank is expected Round-of-32 opponent Elo among qualified runs.",
+        ),
+        encoding="utf-8",
+    )
+
+    portugal_features = features[features["national_team"].eq("Portugal")].copy()
+    portugal_predictions = predictions[
+        predictions["home_team"].eq("Portugal")
+        | predictions["away_team"].eq("Portugal")
+    ].copy()
+    portugal_csv = reports / "portugal_squad_challenger.csv"
+    pd.concat(
+        [
+            portugal_features.assign(record_type="team_features"),
+            portugal_predictions.assign(record_type="remaining_fixture"),
+        ],
+        ignore_index=True,
+        sort=False,
+    ).to_csv(portugal_csv, index=False)
+    portugal_md = reports / "portugal_squad_challenger.md"
+    rank = int(squad_rank["Portugal"])
+    portugal_md.write_text(
+        "# Portugal Squad Scenario Challenger\n\n"
+        "Offline sensitivity analysis only; no expected XI is inferred and no "
+        "production probability is changed.\n\n"
+        f"- Squad-strength rank: {rank}/48\n"
+        f"- Coverage confidence: "
+        f"{float(feature_lookup.loc['Portugal', 'coverage_confidence']):.3f}\n"
+        f"- Bounded log-goal adjustment: "
+        f"{float(feature_lookup.loc['Portugal', 'log_goal_adjustment']):.4f}\n"
+        f"- Base Elo rank: {int(rating_rank['Portugal'])}\n\n"
+        + _markdown_table(
+            portugal_predictions[
+                [
+                    "home_team",
+                    "away_team",
+                    "base_home_win",
+                    "base_draw",
+                    "base_away_win",
+                    "squad_home_win",
+                    "squad_draw",
+                    "squad_away_win",
+                ]
+            ],
+            "Remaining Portugal Group Matches",
+        ),
+        encoding="utf-8",
+    )
+    return [compare_path, compare_md, contender_csv, contender_md, portugal_csv, portugal_md]
+
+
+def _write_portugal_path(result, live, features: pd.DataFrame) -> tuple[Path, Path]:
+    import numpy as np
+
+    trace = result.target_trace
+    if not trace or trace["team"] != "Portugal":
+        raise ValueError("Portugal trace is missing")
+    reports = resolve("artifacts/reports")
+    rows = []
+    expected_elo = trace["expected_opponent_elo"]
+    expected_squad = trace["expected_opponent_squad_strength"]
+    for stage in sorted(set(expected_elo) | set(expected_squad)):
+        rows.append(
+            {
+                "record_type": "expected_opponent_strength",
+                "condition": "unconditional_given_round_reached",
+                "round": stage,
+                "opponent": "",
+                "probability": np.nan,
+                "expected_opponent_elo": expected_elo.get(stage, np.nan),
+                "opponent_squad_strength": expected_squad.get(stage, np.nan),
+            }
+        )
+    for stage, opponents in trace["opponent_counts"].items():
+        for opponent, count in sorted(
+            opponents.items(), key=lambda item: item[1], reverse=True
+        ):
+            rows.append(
+                {
+                    "record_type": "opponent",
+                    "condition": "unconditional",
+                    "round": stage,
+                    "opponent": opponent,
+                    "probability": count / result.n_sims,
+                    "expected_opponent_elo": live.ratings.get(opponent, 1500.0),
+                    "opponent_squad_strength": float(
+                        features.set_index("national_team").loc[
+                            opponent, "score_s7_coverage_shrunk"
+                        ]
+                    ),
+                }
+            )
+    for position, total in trace["conditional_totals"].items():
+        stage_counts = trace["conditional_advancement"].get(str(position), {})
+        for stage in (
+            "round_of_32",
+            "round_of_16",
+            "quarterfinal",
+            "semifinal",
+            "final",
+            "champion",
+        ):
+            rows.append(
+                {
+                    "record_type": "conditional_advancement",
+                    "condition": f"finish_{position}",
+                    "round": stage,
+                    "opponent": "",
+                    "probability": stage_counts.get(stage, 0) / total if total else np.nan,
+                    "expected_opponent_elo": np.nan,
+                    "opponent_squad_strength": np.nan,
+                }
+            )
+    frame = pd.DataFrame(rows)
+    csv_path = reports / "portugal_path_difficulty.csv"
+    md_path = reports / "portugal_path_difficulty.md"
+    frame.to_csv(csv_path, index=False)
+    finish = trace["finish_counts"]
+    r32 = trace["opponent_counts"].get("round_of_32", {})
+    r16 = trace["opponent_counts"].get("round_of_16", {})
+    croatia = r32.get("Croatia", 0) / result.n_sims
+    spain = r16.get("Spain", 0) / result.n_sims
+    portugal = result.advancement_probs["Portugal"]
+    md_path.write_text(
+        "# Portugal Path Difficulty\n\n"
+        "All opponents are probabilistic; none is described as certain.\n\n"
+        f"- Finish first in Group K: {finish.get(1, 0) / result.n_sims:.3%}\n"
+        f"- Finish second: {finish.get(2, 0) / result.n_sims:.3%}\n"
+        f"- Finish third: {finish.get(3, 0) / result.n_sims:.3%}\n"
+        f"- Qualify as a best third-place team: "
+        f"{trace['qualifying_third_probability']:.3%}\n"
+        f"- Face Croatia in Round of 32: {croatia:.3%}\n"
+        f"- Face Spain in Round of 16: {spain:.3%}\n"
+        f"- Face a top-five Elo team before the quarterfinals: "
+        f"{trace['top_team_before_quarterfinal_probability']:.3%}\n"
+        f"- Scenario title probability: {portugal['champion']:.3%}\n\n"
+        + _markdown_table(
+            frame[frame["record_type"].eq("conditional_advancement")],
+            "Conditional Advancement by Group Finish",
+        ),
+        encoding="utf-8",
+    )
+    return csv_path, md_path
+
+
+@tournament_app.command("simulate-squad")
+def tournament_simulate_squad(
+    sims: Annotated[int, typer.Option(help="Research simulation count.")] = 100_000,
+    seed: Annotated[int, typer.Option(help="Random seed.")] = 20260612,
+    force: Annotated[bool, typer.Option("--force")] = False,
+) -> None:
+    """Run the full squad-aware research scenario through the champion."""
+    import json
+    import resource
+    import time
+
+    from goalsignal.feedback.results import result_store_hash
+    from goalsignal.tournament.full_simulator import (
+        check_full_invariants,
+        simulate_full_tournament,
+    )
+    from goalsignal.tournament.reporting import write_full_simulation
+    from goalsignal.utils.hashing import sha256_json
+
+    config, features, feature_version, _feature_path, _feature_meta = (
+        _squad_challenger_features()
+    )
+    live, groups, fixtures, bracket, _base, challenger, _fifa, fifa_manifest = (
+        _squad_tournament_context(features)
+    )
+    result_hash = result_store_hash()
+    base_dir, base_advancement, base_meta = _current_base_simulation(result_hash)
+    version = "squad-" + sha256_json(
+        {
+            "challenger": config.challenger_version,
+            "feature_version": feature_version,
+            "result_hash": result_hash,
+            "bracket_hash": bracket.config_hash,
+            "sims": sims,
+            "seed": seed,
+        }
+    )[:16]
+    out = resolve(Path("artifacts/simulations") / version)
+    if (out / "wc2026_tournament_meta.json").exists() and not force:
+        typer.echo(f"Refusing to overwrite {out}; pass --force.", err=True)
+        raise typer.Exit(code=1)
+    indexed = features.set_index("national_team")
+    top_teams = set(
+        sorted(live.ratings, key=live.ratings.get, reverse=True)[:5]
+    )
+    started = time.perf_counter()
+    result = simulate_full_tournament(
+        groups,
+        fixtures,
+        challenger,
+        bracket,
+        n_sims=sims,
+        seed=seed,
+        target_team="Portugal",
+        opponent_elo=live.ratings,
+        opponent_squad_strength=indexed["score_s7_coverage_shrunk"].to_dict(),
+        top_teams=top_teams,
+    )
+    runtime = time.perf_counter() - started
+    problems = check_full_invariants(result)
+    if problems:
+        raise ValueError(f"simulation invariants failed: {problems}")
+    metadata = {
+        "research_status": "squad-aware scenario challenger; not trained or deployed",
+        "trained": False,
+        "n_sims": sims,
+        "seed": seed,
+        "runtime_seconds": runtime,
+        "max_rss_kb": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
+        "data_cutoff": str(live.cutoff.date()),
+        "model_version": live.model_version,
+        "challenger_version": config.challenger_version,
+        "squad_feature_version": feature_version,
+        "adjustment_strength": config.adjustment,
+        "coverage_thresholds": config.coverage,
+        "fallback_teams": features.loc[
+            features["fallback_used"], "national_team"
+        ].tolist(),
+        "result_store_hash": result_hash,
+        "official_bracket_hash": bracket.config_hash,
+        "official_bracket_manifest": bracket.source_manifest,
+        "fifa_snapshot_id": fifa_manifest["snapshot_id"],
+        "base_simulation_directory": str(base_dir),
+        "base_simulation_version": base_meta["simulation_version"],
+        "completed_fixture_count": sum(f.played for f in fixtures),
+        "remaining_fixture_count": sum(not f.played for f in fixtures),
+        "target_trace": result.target_trace,
+    }
+    write_full_simulation(result, bracket, metadata, version)
+
+    prediction_dirs = sorted(resolve("artifacts/research_predictions").glob("*/metadata.json"))
+    matching_prediction = None
+    for metadata_path in reversed(prediction_dirs):
+        candidate = json.loads(metadata_path.read_text(encoding="utf-8"))
+        if (
+            candidate.get("result_store_hash") == result_hash
+            and candidate.get("feature_version") == feature_version
+        ):
+            matching_prediction = pd.read_csv(
+                metadata_path.parent / "remaining_group_matches.csv"
+            )
+            break
+    if matching_prediction is None:
+        raise ValueError("run `goalsignal squad-model predict` before simulation")
+    paths = _write_squad_research_reports(
+        result,
+        base_advancement,
+        features,
+        config,
+        matching_prediction,
+        live,
+    )
+    portugal_paths = _write_portugal_path(result, live, features)
+    typer.echo(
+        f"Squad research simulation: {sims} sims, seed={seed}, "
+        f"runtime={runtime:.2f}s -> {out}"
+    )
+    typer.echo(f"Reports: {paths + list(portugal_paths)}")
+
+
+@tournament_app.command("compare-squad")
+def tournament_compare_squad() -> None:
+    """Print the current base-versus-squad scenario comparison."""
+    path = resolve("artifacts/reports/base_vs_squad_advancement.csv")
+    if not path.exists():
+        typer.echo("Run `tournament simulate-squad` first.", err=True)
+        raise typer.Exit(code=1)
+    frame = pd.read_csv(path)
+    typer.echo(
+        frame[
+            ["team", "base_p_champion", "p_champion", "delta_champion"]
+        ]
+        .sort_values("delta_champion", ascending=False)
+        .to_string(index=False)
+    )
+
+
+@tournament_app.command("portugal-path")
+def tournament_portugal_path() -> None:
+    """Print the current Portugal conditional path scenario."""
+    path = resolve("artifacts/reports/portugal_path_difficulty.md")
+    if not path.exists():
+        typer.echo("Run `tournament simulate-squad` first.", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(path.read_text(encoding="utf-8"))
+
+
+@squad_model_app.command("compare")
+def squad_model_compare() -> None:
+    """Alias for the current base-versus-squad tournament comparison."""
+    tournament_compare_squad()
+
+
+@squad_model_app.command("portugal")
+def squad_model_portugal() -> None:
+    """Print the Portugal squad and path research reports."""
+    squad_path = resolve("artifacts/reports/portugal_squad_challenger.md")
+    path_path = resolve("artifacts/reports/portugal_path_difficulty.md")
+    if not squad_path.exists() or not path_path.exists():
+        typer.echo("Run squad prediction and simulation commands first.", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(squad_path.read_text(encoding="utf-8"))
+    typer.echo(path_path.read_text(encoding="utf-8"))
 
 
 @playerdata_app.command("inspect")

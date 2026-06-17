@@ -41,9 +41,17 @@ content manifests, deterministic Transfermarkt player linkage, cutoff-safe club
 activity and valuation extraction, national-team lineup coverage, descriptive
 squad aggregates, and readiness reports. No squad-aware model is trained.
 The real snapshot contains 1,248 players across 48 teams and reconciles fully
-to the expanded official extract. Conservative Transfermarkt linkage resolves
-936 players (75.0%), so squad-aware model training remains blocked; see
+to the expanded official extract. Reviewed identity resolution covers 1,233
+players (98.8%): 1,170 locally linkable and 63 accepted web-only. Fifteen
+material conflicts remain, and no squad-aware model is trained; see
 [docs/squad_data.md](docs/squad_data.md).
+
+An offline 2026 squad scenario challenger now converts supported activity,
+valuation, positional, goalkeeper, and depth proxies into bounded,
+coverage-shrunk adjustments. It is not trained or deployed: teams below the
+configured thresholds use the production model unchanged. See
+[docs/squad_model.md](docs/squad_model.md) and
+[docs/squad_scenario_analysis.md](docs/squad_scenario_analysis.md).
 
 ## Data
 
@@ -80,6 +88,10 @@ uv run goalsignal tournament simulate # 100k-sim 2026 WC group stage
 uv run goalsignal squads inspect
 uv run goalsignal squads coverage
 uv run goalsignal squads readiness
+uv run goalsignal squad-model build-features
+uv run goalsignal squad-model predict
+uv run goalsignal tournament simulate-squad
+uv run goalsignal tournament portugal-path
 uv run goalsignal fifa-current validate
 uv run goalsignal fifa-current compare-elo
 uv run goalsignal results verify

@@ -67,6 +67,11 @@ milestone must add its own tests against them.
 - Club and national-team lineup histories remain separate.
 - Expected starter probabilities remain missing until a fitted estimator is
   evaluated chronologically.
+- The 2026 squad scenario is not trained. It uses only activity and historical
+  valuations before the active cutoff, never uses current World Cup outcomes
+  as labels, and falls back to the champion below coverage thresholds.
+- Completed World Cup fixtures are fixed from the result store and excluded
+  from research prediction rows and Monte Carlo score sampling.
 
 ## D1 feature engineering (Milestone D1)
 

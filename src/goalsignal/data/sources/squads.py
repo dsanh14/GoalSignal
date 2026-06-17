@@ -48,6 +48,9 @@ LINK_COLUMNS = [
     "normalized_player_name",
     "canonical_player_id",
     "transfermarkt_player_id",
+    "reviewed_transfermarkt_player_id",
+    "local_snapshot_available",
+    "identity_status",
     "match_class",
     "match_method",
     "candidate_count",
@@ -59,6 +62,7 @@ READINESS_STATES = {
     "restricted subset",
     "blocked by missing squad source",
     "blocked by identity coverage",
+    "blocked by local snapshot absence",
     "blocked by sparse international lineups",
     "blocked by provider plan",
     "unsupported",
@@ -688,9 +692,15 @@ def write_seed_link_reports(report: pd.DataFrame, summary: dict) -> list[Path]:
 def load_reviewed_aliases(path: str | Path | None) -> pd.DataFrame:
     columns = [
         "national_team",
-        "squad_player_name",
-        "transfermarkt_player_id",
+        "official_squad_player_name",
+        "date_of_birth",
+        "official_club",
+        "candidate_transfermarkt_player_id",
+        "transfermarkt_name",
+        "match_evidence",
         "review_status",
+        "reviewer",
+        "reviewed_at",
         "notes",
     ]
     if not path:
@@ -699,8 +709,194 @@ def load_reviewed_aliases(path: str | Path | None) -> pd.DataFrame:
     missing = [column for column in columns if column not in frame]
     if missing:
         raise ValueError(f"player alias CSV missing columns: {missing}")
-    accepted = frame["review_status"].str.casefold().isin({"reviewed", "accepted"})
-    return frame.loc[accepted, columns].copy()
+    return frame.loc[:, columns].copy()
+
+
+def _normalize_source_id(value: str) -> str:
+    return re.sub(r"\.0$", "", str(value or "").strip())
+
+
+def revalidate_reviewed_aliases(
+    squads: pd.DataFrame,
+    aliases: pd.DataFrame,
+    players: pd.DataFrame,
+    *,
+    expected_rows: int | None = None,
+) -> tuple[pd.DataFrame, dict]:
+    """Validate reviewed aliases without requiring every ID in the local snapshot."""
+    report_columns = [
+        "national_team",
+        "official_player_name",
+        "date_of_birth",
+        "official_club",
+        "transfermarkt_player_id",
+        "transfermarkt_name",
+        "match_evidence",
+        "review_status",
+        "reviewer",
+        "reviewed_at",
+        "notes",
+        "local_snapshot_available",
+        "local_player_name",
+        "classification",
+        "reason",
+    ]
+    if aliases.empty and expected_rows is None:
+        return pd.DataFrame(columns=report_columns), {
+            "total": 0,
+            "accepted_local": 0,
+            "accepted_web_only": 0,
+            "conflict": 0,
+            "duplicate_local_id": 0,
+            "by_classification": {},
+        }
+    required_text = [
+        "official_squad_player_name",
+        "national_team",
+        "candidate_transfermarkt_player_id",
+        "transfermarkt_name",
+        "match_evidence",
+        "reviewer",
+        "reviewed_at",
+        "notes",
+    ]
+    errors = []
+    if expected_rows is not None and len(aliases) != expected_rows:
+        errors.append(f"expected {expected_rows} reviewed aliases, got {len(aliases)}")
+    statuses = aliases["review_status"].str.strip().str.casefold()
+    if not statuses.eq("accepted").all():
+        errors.append(
+            f"review statuses must all be accepted: {statuses.value_counts().to_dict()}"
+        )
+    for column in required_text:
+        missing = int(aliases[column].str.strip().eq("").sum())
+        if missing:
+            errors.append(f"{column} missing for {missing} reviewed aliases")
+    official_key = ["national_team", "official_squad_player_name"]
+    if aliases.duplicated(official_key).any():
+        errors.append("duplicate reviewed official squad identities")
+    if errors:
+        raise ValueError("; ".join(errors))
+
+    squad_lookup = {}
+    for squad in squads.itertuples(index=False):
+        for team_name in {squad.national_team, squad.canonical_team}:
+            squad_lookup[
+                (
+                    normalize_team(team_name),
+                    normalize_player_name(squad.player_name),
+                )
+            ] = squad
+    players_by_id = {
+        str(row.player_id): row for row in players.itertuples(index=False)
+    }
+    normalized_ids = aliases["candidate_transfermarkt_player_id"].map(
+        _normalize_source_id
+    )
+    duplicate_ids = set(normalized_ids[normalized_ids.duplicated(keep=False)])
+    rows = []
+    for alias, source_id in zip(
+        aliases.itertuples(index=False), normalized_ids, strict=True
+    ):
+        key = (
+            normalize_team(alias.national_team),
+            normalize_player_name(alias.official_squad_player_name),
+        )
+        squad = squad_lookup.get(key)
+        player = players_by_id.get(source_id)
+        local_available = player is not None
+        name_match = (
+            local_available
+            and normalize_player_name(alias.transfermarkt_name)
+            == normalize_player_name(getattr(player, "name", ""))
+        )
+        alias_dob = _parse_source_date(alias.date_of_birth)
+        squad_dob = squad.date_of_birth_parsed if squad is not None else pd.NaT
+        expected_dob = alias_dob if pd.notna(alias_dob) else squad_dob
+        local_dob = (
+            _parse_source_date(getattr(player, "date_of_birth", ""))
+            if local_available
+            else pd.NaT
+        )
+        dob_conflict = (
+            pd.notna(expected_dob)
+            and pd.notna(local_dob)
+            and pd.Timestamp(expected_dob) != pd.Timestamp(local_dob)
+        )
+        if squad is None:
+            classification = "conflict"
+            reason = "reviewed alias does not map to one official squad player"
+        elif source_id in duplicate_ids:
+            classification = "duplicate_local_id"
+            reason = "reviewed player ID maps to multiple squad players"
+        elif not local_available:
+            classification = "accepted_web_only"
+            reason = "reviewed identity accepted; ID absent from local snapshot"
+        elif not name_match:
+            classification = "conflict"
+            reason = "reviewed Transfermarkt name conflicts with local player row"
+        elif dob_conflict:
+            classification = "conflict"
+            reason = "reviewed date of birth conflicts with local player row"
+        else:
+            classification = "accepted_local"
+            reason = "reviewed identity and local player ID revalidated"
+        rows.append(
+            {
+                "national_team": alias.national_team,
+                "official_player_name": alias.official_squad_player_name,
+                "date_of_birth": alias.date_of_birth,
+                "official_club": alias.official_club,
+                "transfermarkt_player_id": source_id,
+                "transfermarkt_name": alias.transfermarkt_name,
+                "match_evidence": alias.match_evidence,
+                "review_status": alias.review_status,
+                "reviewer": alias.reviewer,
+                "reviewed_at": alias.reviewed_at,
+                "notes": alias.notes,
+                "local_snapshot_available": local_available,
+                "local_player_name": getattr(player, "name", "") if player else "",
+                "classification": classification,
+                "reason": reason,
+            }
+        )
+    report = pd.DataFrame(rows, columns=report_columns)
+    counts = report["classification"].value_counts().to_dict()
+    summary = {
+        "total": len(report),
+        "accepted_local": int(report["classification"].eq("accepted_local").sum()),
+        "accepted_web_only": int(
+            report["classification"].eq("accepted_web_only").sum()
+        ),
+        "conflict": int(report["classification"].eq("conflict").sum()),
+        "duplicate_local_id": int(
+            report["classification"].eq("duplicate_local_id").sum()
+        ),
+        "by_classification": {
+            str(key): int(value) for key, value in counts.items()
+        },
+    }
+    return report, summary
+
+
+def write_alias_revalidation_reports(
+    report: pd.DataFrame, summary: dict
+) -> list[Path]:
+    out = resolve("artifacts/reports")
+    out.mkdir(parents=True, exist_ok=True)
+    full = out / "squad_alias_revalidation.csv"
+    summary_path = out / "squad_alias_revalidation_summary.json"
+    absent = out / "squad_alias_local_absence.csv"
+    conflicts = out / "squad_alias_conflicts.csv"
+    report.to_csv(full, index=False)
+    report[report["classification"].eq("accepted_web_only")].to_csv(
+        absent, index=False
+    )
+    report[
+        report["classification"].isin({"conflict", "duplicate_local_id"})
+    ].to_csv(conflicts, index=False)
+    summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    return [full, summary_path, absent, conflicts]
 
 
 def link_squad_players(
@@ -716,8 +912,8 @@ def link_squad_players(
     players["dob"] = pd.to_datetime(players.get("date_of_birth"), errors="coerce")
     aliases = aliases if aliases is not None else load_reviewed_aliases(None)
     alias_lookup = {
-        (normalize_team(row.national_team), normalize_player_name(row.squad_player_name)):
-        str(row.transfermarkt_player_id)
+        (normalize_team(row.national_team), normalize_player_name(row.official_player_name)):
+        row
         for row in aliases.itertuples(index=False)
     }
     seed_links = seed_links if seed_links is not None else pd.DataFrame()
@@ -738,9 +934,29 @@ def link_squad_players(
         name = squad.normalized_player_name
         team = normalize_team(squad.canonical_team)
         explicit = alias_lookup.get((team, name))
+        web_only = False
+        forced_conflict = False
+        reviewed_source_id = ""
         if explicit:
-            candidates = players[players["player_id"].astype(str).eq(explicit)]
-            method = "reviewed_alias"
+            reviewed_source_id = str(explicit.transfermarkt_player_id)
+            web_only = explicit.classification == "accepted_web_only"
+            forced_conflict = explicit.classification in {
+                "conflict",
+                "duplicate_local_id",
+            }
+            candidates = (
+                players.iloc[0:0]
+                if web_only or forced_conflict
+                else players[
+                    players["player_id"].astype(str).eq(reviewed_source_id)
+                ]
+            )
+            if forced_conflict:
+                method = "reviewed_alias_conflict"
+            elif web_only:
+                method = "reviewed_alias_web_only"
+            else:
+                method = "reviewed_alias_local"
         elif seed_lookup.get((team, name)):
             seed_id = seed_lookup[(team, name)]
             candidates = players[players["player_id"].astype(str).eq(seed_id)]
@@ -778,19 +994,40 @@ def link_squad_players(
                     method = "name_nationality_position"
                 candidates = name_hits[corroborated]
         count = len(candidates)
-        if count == 1:
+        if forced_conflict:
+            match_class = "conflicting"
+            canonical_id = source_id = ""
+            review = "manual_review"
+            identity_status = "conflict"
+            local_available = False
+        elif web_only:
+            match_class = "exact"
+            canonical_id = f"tm:{reviewed_source_id}"
+            source_id = ""
+            review = "accepted"
+            identity_status = "accepted_web_only"
+            local_available = False
+        elif count == 1:
             candidate = candidates.iloc[0]
             match_class = (
                 "exact"
                 if method
-                in {"reviewed_alias", "seed_exact_dob_name", "exact_source_id"}
+                in {"reviewed_alias_local", "seed_exact_dob_name", "exact_source_id"}
                 else "high-confidence deterministic"
             )
             canonical_id = f"tm:{candidate['player_id']}"
             source_id = str(candidate["player_id"])
             review = "accepted"
+            identity_status = (
+                "accepted_local"
+                if method == "reviewed_alias_local"
+                else "deterministic_local"
+            )
+            local_available = True
         elif count > 1:
             match_class, canonical_id, source_id, review = "ambiguous", "", "", "manual_review"
+            identity_status = "unresolved"
+            local_available = False
         else:
             name_count = int(
                 players["name_token_key"]
@@ -805,6 +1042,8 @@ def link_squad_players(
             count = name_count
             if name_count:
                 method = "name_only_rejected"
+            identity_status = "unresolved"
+            local_available = False
         rows.append(
             {
                 "snapshot_date": squad.snapshot_date,
@@ -815,6 +1054,9 @@ def link_squad_players(
                 "normalized_player_name": name,
                 "canonical_player_id": canonical_id,
                 "transfermarkt_player_id": source_id,
+                "reviewed_transfermarkt_player_id": reviewed_source_id,
+                "local_snapshot_available": local_available,
+                "identity_status": identity_status,
                 "match_class": match_class,
                 "match_method": method,
                 "candidate_count": count,
@@ -827,12 +1069,14 @@ def link_squad_players(
         ["snapshot_date", "canonical_player_id"], keep=False
     )
     if duplicated.any():
-        links.loc[accepted.index[duplicated], ["match_class", "review_status"]] = [
-            "conflicting",
-            "manual_review",
-        ]
+        duplicate_index = accepted.index[duplicated]
         links.loc[
-            accepted.index[duplicated],
+            duplicate_index,
+            ["match_class", "review_status", "identity_status"],
+        ] = ["conflicting", "manual_review", "duplicate_local_id"]
+        links.loc[duplicate_index, "local_snapshot_available"] = False
+        links.loc[
+            duplicate_index,
             ["canonical_player_id", "transfermarkt_player_id"],
         ] = ""
     return links
@@ -852,12 +1096,14 @@ def write_link_reports(links: pd.DataFrame) -> dict:
         out / "squad_player_conflicts.csv", index=False
     )
     counts = links["match_class"].value_counts().to_dict()
-    accepted = int(
-        links["match_class"].isin({"exact", "high-confidence deterministic"}).sum()
-    )
+    accepted = int(links["canonical_player_id"].ne("").sum())
+    local = int(links["local_snapshot_available"].fillna(False).sum())
+    web_only = int(links["identity_status"].eq("accepted_web_only").sum())
     summary = {
         "total": len(links),
         "linked": accepted,
+        "locally_linkable": local,
+        "accepted_web_only": web_only,
         "link_rate": accepted / len(links) if len(links) else None,
         "by_class": {str(key): int(value) for key, value in counts.items()},
         "by_method": {
@@ -974,11 +1220,21 @@ def build_player_activity(
         for key, block in lineups.groupby("_player_key", sort=False)
     }
     rows = []
-    linked = links[links["transfermarkt_player_id"].ne("")]
-    for link in linked.itertuples(index=False):
+    for link in links.itertuples(index=False):
         player_id = str(link.transfermarkt_player_id)
-        apps = appearances_by_player.get(player_id, appearances.iloc[0:0])
-        starts = starts_by_player.get(player_id, lineups.iloc[0:0])
+        local_available = bool(
+            getattr(link, "local_snapshot_available", bool(player_id))
+        )
+        apps = (
+            appearances_by_player.get(player_id, appearances.iloc[0:0])
+            if local_available
+            else appearances.iloc[0:0]
+        )
+        starts = (
+            starts_by_player.get(player_id, lineups.iloc[0:0])
+            if local_available
+            else lineups.iloc[0:0]
+        )
         row = {
             "snapshot_date": link.snapshot_date,
             "group": getattr(link, "group", ""),
@@ -987,10 +1243,20 @@ def build_player_activity(
             "position": getattr(link, "position", ""),
             "canonical_player_id": link.canonical_player_id,
             "transfermarkt_player_id": player_id,
+            "reviewed_transfermarkt_player_id": getattr(
+                link, "reviewed_transfermarkt_player_id", ""
+            ),
+            "identity_status": getattr(link, "identity_status", ""),
+            "local_snapshot_available": local_available,
+            "activity_available": local_available,
             "match_class": getattr(link, "match_class", ""),
             "prediction_cutoff": cutoff.isoformat(),
-            "days_since_last_appearance": _days_since(apps["date"], cutoff),
-            "days_since_last_start": _days_since(starts["date"], cutoff),
+            "days_since_last_appearance": (
+                _days_since(apps["date"], cutoff) if local_available else np.nan
+            ),
+            "days_since_last_start": (
+                _days_since(starts["date"], cutoff) if local_available else np.nan
+            ),
         }
         latest = apps.sort_values("date").iloc[-1] if len(apps) else None
         row["last_appearance_club_id"] = (
@@ -1000,6 +1266,13 @@ def build_player_activity(
             str(latest.get("competition_id", "")) if latest is not None else ""
         )
         for days in windows:
+            if not local_available:
+                for field in ("minutes", "appearances", "starts"):
+                    row[f"{field}_{days}d"] = np.nan
+                if days >= 90:
+                    for stat in ("goals", "assists", "yellow_cards", "red_cards"):
+                        row[f"{stat}_{days}d"] = np.nan
+                continue
             start = cutoff - pd.Timedelta(days=days)
             window_apps = apps[apps["date"].ge(start)]
             window_starts = starts[starts["date"].ge(start)]
@@ -1037,9 +1310,20 @@ def build_historical_valuations(
         for key, block in valuations.groupby("_player_key", sort=False)
     }
     rows = []
-    for link in links[links["transfermarkt_player_id"].ne("")].itertuples(index=False):
-        player = values_by_player.get(
-            str(link.transfermarkt_player_id), valuations.iloc[0:0]
+    for link in links.itertuples(index=False):
+        local_available = bool(
+            getattr(
+                link,
+                "local_snapshot_available",
+                bool(str(link.transfermarkt_player_id)),
+            )
+        )
+        player = (
+            values_by_player.get(
+                str(link.transfermarkt_player_id), valuations.iloc[0:0]
+            )
+            if local_available
+            else valuations.iloc[0:0]
         )
         latest = player.iloc[-1] if len(player) else None
         rows.append(
@@ -1051,6 +1335,11 @@ def build_historical_valuations(
                 "match_class": getattr(link, "match_class", ""),
                 "canonical_player_id": link.canonical_player_id,
                 "transfermarkt_player_id": link.transfermarkt_player_id,
+                "reviewed_transfermarkt_player_id": getattr(
+                    link, "reviewed_transfermarkt_player_id", ""
+                ),
+                "identity_status": getattr(link, "identity_status", ""),
+                "local_snapshot_available": local_available,
                 "prediction_cutoff": cutoff.isoformat(),
                 "historical_valuation": (
                     float(latest["market_value_in_eur"])
@@ -1064,7 +1353,7 @@ def build_historical_valuations(
                 "valuation_age_days": (
                     int((cutoff - latest["date"]).days) if latest is not None else np.nan
                 ),
-                "available": latest is not None,
+                "available": latest is not None and local_available,
                 "source_snapshot_id": source_snapshot_id,
             }
         )
@@ -1125,6 +1414,12 @@ def build_squad_aggregates(
                 "national_team": team,
                 "squad_players": len(block),
                 "linked_players": int(block["canonical_player_id"].fillna("").ne("").sum()),
+                "locally_linked_players": int(
+                    block["local_snapshot_available"].fillna(False).sum()
+                ),
+                "web_only_identities": int(
+                    block["identity_status"].eq("accepted_web_only").sum()
+                ),
                 "total_recent_club_minutes_90d": minutes.sum(min_count=1),
                 "median_recent_club_minutes_90d": minutes.median(),
                 "total_recent_club_starts_90d": pd.to_numeric(
@@ -1162,6 +1457,14 @@ def build_squad_aggregates(
                     "players": len(position_block),
                     "linked": int(
                         position_block["canonical_player_id"].fillna("").ne("").sum()
+                    ),
+                    "locally_linked": int(
+                        position_block["local_snapshot_available"].fillna(False).sum()
+                    ),
+                    "web_only_identities": int(
+                        position_block["identity_status"].eq(
+                            "accepted_web_only"
+                        ).sum()
                     ),
                     "minutes_90d_coverage": float(
                         pd.to_numeric(
@@ -1378,16 +1681,21 @@ def build_feature_readiness(
     *,
     squad_available: bool,
     identity_link_rate: float | None,
+    local_snapshot_rate: float | None = None,
     statsbomb_available: bool,
     international_lineup_ready: bool,
 ) -> dict:
     squad_block = "blocked by missing squad source"
     identity_block = "blocked by identity coverage"
-    base = (
-        "ready with cutoff"
-        if squad_available and identity_link_rate is not None and identity_link_rate >= 0.8
-        else identity_block if squad_available else squad_block
-    )
+    local_block = "blocked by local snapshot absence"
+    if not squad_available:
+        base = squad_block
+    elif identity_link_rate is None or identity_link_rate < 0.98:
+        base = identity_block
+    elif local_snapshot_rate is None or local_snapshot_rate < 0.9:
+        base = local_block
+    else:
+        base = "ready with cutoff"
     families = {
         "recent club minutes": base,
         "recent club starts": base,
@@ -1426,6 +1734,7 @@ def build_feature_readiness(
         "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "squad_source_available": squad_available,
         "identity_link_rate": identity_link_rate,
+        "local_snapshot_rate": local_snapshot_rate,
         "families": families,
     }
 

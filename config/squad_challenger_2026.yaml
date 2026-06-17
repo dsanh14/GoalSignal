@@ -1,0 +1,43 @@
+feature_version: squad-2026-v1
+challenger_version: squad-scenario-s7-v1
+prediction_cutoff: "2026-06-15"
+simulation_count: 100000
+seed: 20260612
+
+coverage:
+  minimum_identity_coverage: 0.92
+  minimum_local_activity_coverage: 0.75
+  minimum_valuation_coverage: 0.50
+  minimum_goalkeeper_local_coverage: 0.66
+  minimum_position_local_coverage: 0.70
+  maximum_missingness: 0.25
+  stale_valuation_days: 365
+
+adjustment:
+  maximum_log_goal_adjustment: 0.18
+  final_strength: 0.10
+  score_clip: 2.5
+  weights:
+    activity: 0.25
+    starts: 0.10
+    valuation: 0.20
+    positional: 0.20
+    goalkeeper: 0.10
+    depth: 0.15
+
+contender_report_teams:
+  - Argentina
+  - Spain
+  - France
+  - England
+  - Portugal
+  - Brazil
+  - Germany
+  - Netherlands
+  - Belgium
+  - Morocco
+  - Colombia
+  - Croatia
+  - Uruguay
+  - Japan
+  - United States

@@ -53,8 +53,8 @@ high-confidence deterministic, ambiguous, unmatched, or conflicting. Reports
 are written to `artifacts/reports/squad_player_*`.
 
 For the real 2026 snapshot, independent revalidation accepted 332 seed links.
-The full hierarchy links 936/1,248 players (75.0%): 332 accepted seed links and
-604 newly resolved deterministic links. There are 104 ambiguous, 208 unmatched,
-and zero conflicting final identities. Unresolved rows are written as pending
-review to `data/reference/world_cup_2026_player_aliases.csv`; none are accepted
-automatically.
+The reviewed alias pass adds 234 local identities and 63 accepted web-only
+identities. Final coverage is 1,233/1,248 (98.8%), with 1,170 locally linkable
+players and 15 material conflicts (13 DOB, 2 local-name disagreements).
+Web-only identities retain canonical IDs but never receive fabricated local
+activity or valuations.

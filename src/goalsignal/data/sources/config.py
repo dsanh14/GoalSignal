@@ -239,6 +239,9 @@ class SquadDataConfig(BaseModel):
     )
     availability_path_env: str = "FIFA_2026_AVAILABILITY_PATH"
     player_aliases_path_env: str = "FIFA_2026_PLAYER_ALIASES_PATH"
+    player_aliases_default_path: str = (
+        "data/reference/world_cup_2026_player_aliases.csv"
+    )
     allowed_statuses: list[str] = Field(
         default_factory=lambda: ["selected", "reserve", "replacement", "withdrawn"]
     )
@@ -256,6 +259,7 @@ class SquadDataConfig(BaseModel):
     expected_rows: int | None = None
     expected_teams: int | None = None
     expected_players_per_team: int | None = None
+    expected_alias_rows: int | None = None
     license: str = "Official FIFA/federation squad publications; per-source terms"
     attribution: str = "Official FIFA World Cup 2026 squad source"
 

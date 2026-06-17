@@ -10,12 +10,14 @@ link_candidates_path_env: FIFA_2026_PLAYER_LINK_CANDIDATES_PATH
 link_candidates_default_path: Datasets/world_cup_2026_player_link_candidates.csv
 availability_path_env: FIFA_2026_AVAILABILITY_PATH
 player_aliases_path_env: FIFA_2026_PLAYER_ALIASES_PATH
+player_aliases_default_path: data/reference/world_cup_2026_player_aliases.csv
 
 allowed_statuses: [selected, reserve, replacement, withdrawn]
 activity_windows_days: [30, 90, 180, 365]
 expected_rows: 1248
 expected_teams: 48
 expected_players_per_team: 26
+expected_alias_rows: 312
 
 position_groups:
   goalkeeper: [goalkeeper, keeper]

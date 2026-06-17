@@ -6,8 +6,8 @@ squad-aware model, estimate an XI, or alter a forecast.
 ## Current Classification
 
 - Recent club minutes, starts, goals/assists, historical valuations, positional
-  depth, goalkeeper activity, and bench-depth proxies are currently
-  **blocked by identity coverage** at a 75.0% deterministic link rate.
+  depth, goalkeeper activity, and bench-depth proxies are **ready with cutoff**
+  at 98.8% identity coverage and 93.8% local-snapshot coverage.
 - Player age is **ready** where the official source supplies DOB.
 - Club and competition strength: **restricted subset**. Dated appearances
   and competitions are usable; current total market values and season-final
@@ -23,12 +23,14 @@ squad-aware model, estimate an XI, or alter a forecast.
 The generated source of truth is
 `artifacts/reports/squad_feature_readiness.{json,md}`.
 
-The dated extraction produced 936 activity rows. At 90 days, 549 have
-non-missing minute totals. Historical valuation coverage is 705/936 (75.3%),
-with a median age of 188 days and 269 values older than 365 days.
+The dated extraction covers all 1,248 squad rows while leaving unavailable
+fields missing. There are 488 players with 30-day minutes, 647 with 90-day
+minutes, and 1,170 with local start-count availability. Historical valuation
+coverage is 838/1,248 (67.1%), or 71.6% among locally linkable players, with a
+median age of 188 days and 324 values older than 365 days.
 National-team lineup coverage is partial for 22 teams, sparse for 4, and
-unavailable for 22. Portugal has 0/26 deterministic links under the current
-evidence, so no Portugal squad-strength or expected-XI claim is supported.
+unavailable for 22. Portugal is 26/26 accepted-local, but its national-team
+lineup history remains unavailable, so expected-XI modeling is still blocked.
 
 ## Expected-Lineup Contract
 

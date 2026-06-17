@@ -55,3 +55,8 @@ Validation found 1,248 selected players, 48 teams, 26 players per team, and
 four teams in each group A-L. The expanded FIFA extract reconciles all 1,248
 rows: 1,040 exact and 208 normalization-equivalent optional-field shifts, with
 no substantive discrepancy or missing PDF page. Raw files remain read-only.
+
+The completed 312-row alias review is revalidated against both the official
+squad and local Transfermarkt snapshot. Results are 234 accepted-local, 63
+accepted web-only, and 15 conflicts. The alias source is preserved byte-for-byte;
+generated classifications live under `artifacts/reports/squad_alias_*`.

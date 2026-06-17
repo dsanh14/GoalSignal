@@ -31,6 +31,7 @@ class FullSimulationResult:
     matchup_counts: dict[int, Counter]
     winner_counts: dict[int, Counter]
     resolution_counts: Counter
+    target_trace: dict | None = None
 
     def mc_standard_error(self, p: float) -> float:
         return float(np.sqrt(p * (1.0 - p) / self.n_sims))
@@ -183,6 +184,10 @@ def simulate_full_tournament(
     bracket: OfficialBracket,
     n_sims: int = 100_000,
     seed: int = 20260612,
+    target_team: str | None = None,
+    opponent_elo: dict[str, float] | None = None,
+    opponent_squad_strength: dict[str, float] | None = None,
+    top_teams: set[str] | None = None,
 ) -> FullSimulationResult:
     rng = np.random.default_rng(seed)
     (
@@ -201,6 +206,20 @@ def simulate_full_tournament(
     winner_counts = defaultdict(Counter)
     resolution_counts = Counter()
     pair_cache = {}
+    trace = None
+    if target_team is not None:
+        trace = {
+            "team": target_team,
+            "finish_counts": Counter(),
+            "opponent_counts": defaultdict(Counter),
+            "conditional_totals": Counter(),
+            "conditional_advancement": defaultdict(Counter),
+            "qualifying_third": 0,
+            "opponent_elo_sum": Counter(),
+            "opponent_squad_strength_sum": Counter(),
+            "opponent_strength_count": Counter(),
+            "top_team_before_quarterfinal": 0,
+        }
 
     def play(number, home, away):
         key = (home, away)
@@ -226,9 +245,25 @@ def simulate_full_tournament(
         best_groups = [group_letters[int(i)] for i in best_third_indices[:, sim]]
         resolved = bracket.resolve_round_of_32(standings, best_groups)
         outcomes = {}
+        target_finish = None
+        target_reached = set()
+        target_met_top_early = False
+        if trace is not None:
+            for position, team in enumerate(standings[
+                next(group for group, members in groups.items() if target_team in members)
+            ], 1):
+                if team == target_team:
+                    target_finish = position
+                    break
+            trace["finish_counts"][target_finish] += 1
+            trace["conditional_totals"][target_finish] += 1
         for pair in resolved.values():
             for team in pair:
                 advancement[team]["round_of_32"] += 1
+                if trace is not None and team == target_team:
+                    target_reached.add("round_of_32")
+                    if target_finish == 3:
+                        trace["qualifying_third"] += 1
         for number in range(73, 105):
             if number <= 88:
                 home, away = resolved[number]
@@ -240,19 +275,77 @@ def simulate_full_tournament(
                 home, away = entrants
             outcomes[number] = play(number, home, away)
             winner, loser = outcomes[number]
+            if trace is not None and target_team in (home, away):
+                round_name = bracket.matches[number].round
+                opponent = away if home == target_team else home
+                trace["opponent_counts"][round_name][opponent] += 1
+                if opponent_elo and opponent in opponent_elo:
+                    trace["opponent_elo_sum"][round_name] += opponent_elo[opponent]
+                if opponent_squad_strength and opponent in opponent_squad_strength:
+                    trace["opponent_squad_strength_sum"][
+                        round_name
+                    ] += opponent_squad_strength[opponent]
+                trace["opponent_strength_count"][round_name] += 1
+                if number <= 96 and top_teams and opponent in top_teams:
+                    target_met_top_early = True
             if number <= 88:
                 advancement[winner]["round_of_16"] += 1
+                if trace is not None and winner == target_team:
+                    target_reached.add("round_of_16")
             elif number <= 96:
                 advancement[winner]["quarterfinal"] += 1
+                if trace is not None and winner == target_team:
+                    target_reached.add("quarterfinal")
             elif number <= 100:
                 advancement[winner]["semifinal"] += 1
+                if trace is not None and winner == target_team:
+                    target_reached.add("semifinal")
             elif number <= 102:
                 advancement[winner]["final"] += 1
+                if trace is not None and winner == target_team:
+                    target_reached.add("final")
             elif number == 103:
                 third_place[winner] += 1
                 fourth_place[loser] += 1
             else:
                 advancement[winner]["champion"] += 1
+                if trace is not None and winner == target_team:
+                    target_reached.add("champion")
+        if trace is not None:
+            for stage in STAGES:
+                if stage in target_reached:
+                    trace["conditional_advancement"][target_finish][stage] += 1
+            if target_met_top_early:
+                trace["top_team_before_quarterfinal"] += 1
+
+    if trace is not None:
+        trace = {
+            "team": trace["team"],
+            "finish_counts": dict(trace["finish_counts"]),
+            "opponent_counts": {
+                stage: dict(counter)
+                for stage, counter in trace["opponent_counts"].items()
+            },
+            "conditional_totals": dict(trace["conditional_totals"]),
+            "conditional_advancement": {
+                str(position): dict(counter)
+                for position, counter in trace["conditional_advancement"].items()
+            },
+            "qualifying_third_probability": trace["qualifying_third"] / n_sims,
+            "expected_opponent_elo": {
+                stage: trace["opponent_elo_sum"][stage] / count
+                for stage, count in trace["opponent_strength_count"].items()
+                if count
+            },
+            "expected_opponent_squad_strength": {
+                stage: trace["opponent_squad_strength_sum"][stage] / count
+                for stage, count in trace["opponent_strength_count"].items()
+                if count
+            },
+            "top_team_before_quarterfinal_probability": (
+                trace["top_team_before_quarterfinal"] / n_sims
+            ),
+        }
 
     return FullSimulationResult(
         n_sims=n_sims,
@@ -271,6 +364,7 @@ def simulate_full_tournament(
         matchup_counts=dict(matchup_counts),
         winner_counts=dict(winner_counts),
         resolution_counts=resolution_counts,
+        target_trace=trace,
     )
 
 

@@ -101,3 +101,44 @@ def test_seeded_full_simulation_is_reproducible_and_valid():
     assert first.matchup_counts == second.matchup_counts
     assert sum(p["champion"] for p in first.advancement_probs.values()) == pytest.approx(1)
     assert sum(p["final"] for p in first.advancement_probs.values()) == pytest.approx(2)
+
+
+def test_target_trace_records_conditional_paths_and_strength():
+    groups, fixtures = _groups_and_fixtures()
+    bracket = OfficialBracket.load()
+    target = "A1"
+    ratings = {team: 1500.0 for teams in groups.values() for team in teams}
+    strengths = {team: 0.0 for teams in groups.values() for team in teams}
+
+    result = simulate_full_tournament(
+        groups,
+        fixtures,
+        FixedModel(),
+        bracket,
+        n_sims=40,
+        seed=9,
+        target_team=target,
+        opponent_elo=ratings,
+        opponent_squad_strength=strengths,
+        top_teams={"B1"},
+    )
+    trace = result.target_trace
+
+    assert trace is not None
+    assert sum(trace["finish_counts"].values()) == 40
+    assert sum(trace["conditional_totals"].values()) == 40
+    assert 0 <= trace["qualifying_third_probability"] <= 1
+    assert 0 <= trace["top_team_before_quarterfinal_probability"] <= 1
+    assert set(trace["expected_opponent_elo"]).issubset(trace["opponent_counts"])
+    assert trace["conditional_advancement"] == simulate_full_tournament(
+        groups,
+        fixtures,
+        FixedModel(),
+        bracket,
+        n_sims=40,
+        seed=9,
+        target_team=target,
+        opponent_elo=ratings,
+        opponent_squad_strength=strengths,
+        top_teams={"B1"},
+    ).target_trace["conditional_advancement"]

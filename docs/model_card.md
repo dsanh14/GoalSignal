@@ -41,3 +41,16 @@ logistic baseline (D1-0, log loss 0.8975 on 13,266 test matches, 2010-2023).
 - FIFA data ends 2024-09-19; 2026 fixtures get no FIFA values (native fallback).
 - Player/lineup/StatsBomb/live-API features are out of scope here (blocked or
   deferred per the source-readiness audit).
+
+## 2026 squad scenario challenger (OFFLINE only)
+
+`squad-scenario-s7-v1` is a transparent live sensitivity adjustment around the
+unchanged champion. It is not fitted to outcomes and makes no claim of
+predictive improvement. Supported squad features are standardized over the
+current 48-team field, shrunk by coverage confidence, clipped, and applied to
+expected goals. Failed coverage thresholds produce exact base-model fallback.
+
+The verified 100,000-run scenario moved Portugal from 4.195% to 4.871% title
+probability. This is a scenario change, not a validated gain. Historical,
+cutoff-correct squad reconstruction and chronological champion comparison are
+required before deployment.
