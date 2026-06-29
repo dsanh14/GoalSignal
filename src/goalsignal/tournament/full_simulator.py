@@ -165,7 +165,7 @@ def _pair_resolution_probabilities(home: str, away: str, model) -> np.ndarray:
     et_home = float(1.0 - skellam.cdf(0, lam_home / 3, lam_away / 3))
     et_away = float(skellam.cdf(-1, lam_home / 3, lam_away / 3))
     et_draw = float(skellam.pmf(0, lam_home / 3, lam_away / 3))
-    return np.array(
+    vec = np.array(
         [
             reg_home,
             reg_away,
@@ -175,6 +175,20 @@ def _pair_resolution_probabilities(home: str, away: str, model) -> np.ndarray:
             draw * et_draw * 0.5,
         ]
     )
+    # Opt-in: when the model exposes ensemble advance probabilities (the
+    # EnsembleGoalAdapter), rescale the home/away buckets to match them while
+    # keeping the goal model's regulation/extra-time/penalty split. A plain
+    # RatingsGoalAdapter has no such attribute, so the default path is unchanged.
+    advance_fn = getattr(model, "advance_probs", None)
+    if advance_fn is not None:
+        p_home, p_away = advance_fn(home, away)
+        home_mass = vec[[0, 2, 4]].sum()
+        away_mass = vec[[1, 3, 5]].sum()
+        if home_mass > 1e-12:
+            vec[[0, 2, 4]] *= p_home / home_mass
+        if away_mass > 1e-12:
+            vec[[1, 3, 5]] *= p_away / away_mass
+    return vec
 
 
 def simulate_full_tournament(
