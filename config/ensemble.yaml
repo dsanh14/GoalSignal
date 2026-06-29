@@ -1,0 +1,68 @@
+# Meta-ensemble configuration.
+#
+# GoalSignal's product output is calibrated win/advance probabilities. The
+# meta-ensemble blends independent *signals* (each a probability distribution
+# over outcomes) with configurable weights. Weights are NOT hardcoded in the
+# model layer — they live here and are renormalized across whichever signals
+# are actually available for a given match.
+#
+# Signal names must match the keys produced by the signal layer:
+#   historical      — the deployed statistical model (Elo/Poisson/DC ensemble)
+#   market          — market-implied probabilities (vig removed)
+#   squad_strength  — manual squad-strength file
+#   recent_form     — opponent-adjusted recent form
+#   expert          — LLM/expert consensus
+#   venue_context   — host/travel/rest/climate context
+
+# Default product weights (the "final_ensemble" model version).
+default_weights:
+  historical: 0.35
+  market: 0.25
+  squad_strength: 0.15
+  recent_form: 0.10
+  expert: 0.10
+  venue_context: 0.05
+
+# Named model versions for backtesting and champion/challenger comparison.
+# Each is a weight map over signals; weights renormalize over available signals.
+model_versions:
+  baseline_historical:
+    historical: 1.0
+  market_only:
+    market: 1.0
+  squad_form_challenger:
+    historical: 0.50
+    squad_strength: 0.30
+    recent_form: 0.20
+  llm_adjusted_challenger:
+    historical: 0.60
+    expert: 0.40
+  final_ensemble:
+    historical: 0.35
+    market: 0.25
+    squad_strength: 0.15
+    recent_form: 0.10
+    expert: 0.10
+    venue_context: 0.05
+
+# Parameters for the adjustment-style signals (squad/form/venue), which convert
+# a scalar strength edge into a W/D/L distribution via the Davidson map.
+signal_params:
+  davidson_scale: 400.0     # Elo logistic scale
+  davidson_nu: 1.0          # draw propensity
+  squad_points_per_z: 60.0  # Elo-like points per standardized squad-strength unit
+  form_points_per_z: 40.0   # ... per standardized recent-form unit
+  venue:
+    travel_per_1000km: 8.0
+    rest_per_day: 6.0
+    timezone_per_hour: 3.0
+
+# Market overround removal: "proportional" (booksum scaling) or "power" (Shin).
+market_overround_method: proportional
+
+# Knockout reduction: probability team A survives a tie that reaches penalties.
+knockout_tiebreak_a_prob: 0.5
+
+# Disagreement threshold (total-variation distance) above which a match is
+# flagged for manual review by `goalsignal signals disagreement`.
+disagreement_threshold: 0.15

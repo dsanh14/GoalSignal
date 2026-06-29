@@ -1,0 +1,6 @@
+match_id,team_a,team_b,source_model,team_a_win_prob,draw_prob,team_b_win_prob,team_a_advance_prob,team_b_advance_prob,confidence,reasoning
+G01,Spain,Germany,analyst-a,0.48,0.27,0.25,,,0.7,Spain's midfield control should dominate possession.
+G01,Spain,Germany,llm-opus,0.45,0.28,0.27,,,0.6,Close game; Germany's press creates chances.
+G02,Mexico,Canada,analyst-a,0.55,0.26,0.19,,,0.8,Strong Mexico home support and altitude edge.
+G03,Brazil,Argentina,llm-opus,0.40,0.27,0.33,,,0.5,Coin-flip clasico; slight edge to Brazil at home.
+K01,Spain,Germany,llm-opus,,,,0.62,0.38,0.6,Favorite advances; penalties a real risk.
