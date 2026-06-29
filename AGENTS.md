@@ -359,6 +359,86 @@ venue features and evaluated them via chronological ablation. **Deployed
   `artifacts/reports/`. Recommendation: advance native form + attack/defense to
   a deployment-grade eval **against the ensemble champion**; do not deploy here.
 
+### Outcome-first signal layer + ensemble wiring (opt-in)
+
+A win/advance-probability product layer sits **on top of** the deployed model;
+nothing here changes `ensemble-v1`, the ledger, or the default behaviour of any
+existing command.
+
+- **Signals** (`src/goalsignal/signals/`): standardized `OutcomeProbs`
+  (group W/D/L) and `AdvanceProbs` (knockout) from six sources — `historical`,
+  `market` (decimal odds → vig-removed), `squad_strength`, `recent_form`,
+  `venue_context`, `expert` (LLM/analyst). Adjustment signals map a scalar edge
+  through a fixed (config-driven, **unfitted**) Davidson model. Manual inputs in
+  `data/manual/*.example.csv`; every file/column optional.
+- **Meta-ensemble** (`signals/meta_ensemble.py`, `config/ensemble.yaml`):
+  configurable weighted linear pool; **renormalizes over available signals**;
+  named versions `baseline_historical` / `market_only` / `squad_form_challenger`
+  / `llm_adjusted_challenger` / `final_ensemble`; records provenance + pairwise
+  disagreement.
+- **Historical adapter** (`signals/historical_adapter.py`): converts the trained
+  `LiveModel` into signals (W/D/L from `predict_outcome`; advancement from the
+  goal model's reg/ET/pen resolution). Provenance `live_model|fixture|unavailable`;
+  missing returns gracefully.
+- **Prediction API** (`signals/api.py`): `EnsemblePredictor.predict_match_ensemble`
+  / `predict_knockout_ensemble` / `predict_batch_ensemble` — the main internal
+  interface. CLI: `goalsignal signals predict|blend|market|disagreement|validate|
+  tune-weights`.
+- **Tournament** (`tournament/ensemble_adapter.py`): `EnsembleGoalAdapter`
+  reweights the score matrix to ensemble W/D/L marginals (GD/GF tiebreakers
+  preserved) and adds an `advance_probs` hook to `full_simulator.
+  _pair_resolution_probabilities` (backward-compatible — historical path
+  unchanged). Opt in with `goalsignal tournament simulate --prediction-source
+  ensemble [--ensemble-version V]`; writes a distinct artifact version
+  (`<ver>.ensemble-<V>`) and a provenance summary. Verified end-to-end on the
+  real fixtures (300 sims): 307 matchups, all historical from the live model,
+  invariants hold.
+- **Backtest** (`evaluation/ensemble_backtest.py`): fixed-weight, leakage-safe
+  version comparison → `artifacts/ensemble/backtest_comparison.csv` (outcome
+  metrics + coverage + missing rate + high-disagreement buckets; sample input
+  flagged a smoke test).
+- **Weight tuning** (`signals/tuning.py`): **validation-only**; writes
+  `artifacts/ensemble/tuned_weights.yaml` with justifying metrics; never mutates
+  `config/ensemble.yaml`.
+- **Eval** (`evaluation/outcome_eval.py`): per-class + binary (advance)
+  calibration tables, `compare()` summary. Metrics: log loss / Brier /
+  calibration primary; accuracy secondary.
+- **Docs:** `README.md`, `docs/ensemble_signals.md`. **Status:** product layer
+  implemented, tested (signal + wiring suites), ruff clean. Not yet deployed and
+  no challenger auto-promoted.
+
+#### Empirical evaluation + dynamic keying (2026-06-28)
+
+- **Real backtest** (`evaluation/ensemble_backtest.py`, `goalsignal evaluate
+  ensemble-backtest --predictions artifacts/reports/backtest/test_predictions.csv`):
+  reuses the deployed model's leakage-safe out-of-sample `ensemble_*` columns as
+  the `historical` signal — no retraining, no new leakage. Writes four artifacts
+  to `artifacts/ensemble/`: `backtest_comparison.csv`, `backtest_summary.md`
+  (the no-overclaim verdict), `calibration_by_version.csv`, `coverage_by_signal.csv`.
+  **Verified on 15,499 matches:** baseline_historical log loss **0.8924** (matches
+  the canonical figure); final_ensemble **identical** because non-historical
+  manual coverage is ~0 → verdict **INSUFFICIENT DATA, keep opt-in** (honest, not
+  overclaimed). Smoke path (sample) remains for CI.
+- **Ablation** (`goalsignal evaluate ensemble-ablation`): historical-only vs
+  historical + each signal group vs full; `ablation_comparison.csv` +
+  `ablation_summary.md`. On real data all deltas ≈ 0 (coverage ~0).
+- **Tuning** (`signals/tuning.py`): validation-only; now also writes
+  `tuning_report.md` and emits/records a **low-coverage warning**; still never
+  mutates `config/ensemble.yaml`.
+- **Dynamic keying** (`signals/keying.py`): market/expert/venue rows may carry
+  `team_a`/`team_b` (+ `stage` for venue) and resolve by normalized team pair —
+  precedence match_id > forward pair > reverse pair (directional probs flipped
+  via `OutcomeProbs.flip`/`AdvanceProbs.flip`; venue advantage negated). This
+  closes the earlier gap: market/venue now attach to dynamic knockout pairings
+  in the ensemble tournament (was 0 coverage before). Example files gained
+  `team_a`/`team_b` columns (match_id still wins, so prior results unchanged).
+- **Tests:** `tests/unit/test_keying.py`, `tests/unit/test_ensemble_reports.py`.
+  Suite **279 passed**, ruff clean.
+- **Open:** adjustment scalings still unfitted; **no real manual signal data at
+  historical scale** — the only honest blocker to concluding the ensemble beats
+  the baseline. Provide real market/squad/form/venue/expert coverage, then re-run
+  the real backtest + ablation before considering promotion.
+
 ## Conventions
 
 - Python 3.12, uv-managed. Ruff (line length 100); pytest; all tests must pass
