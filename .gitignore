@@ -26,3 +26,7 @@ data/external/
 # Environment / credentials (placeholders live in .env.example, which IS tracked)
 .env
 .env.local
+
+# Transfermarkt lineups exceed GitHub's 100 MB limit — keep locally, not in git.
+Datasets/transfermarkt-datasets/game_lineups.csv
+Datasets/transfermarkt-datasets/game_lineups.csv.gz
