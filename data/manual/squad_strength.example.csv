@@ -1,0 +1,7 @@
+team,total_squad_value,starting_xi_value,top5_league_minutes,champions_league_minutes,club_minutes_30d,club_minutes_90d,keeper_strength,attacking_depth,defensive_depth,missing_stars,suspensions,avg_age
+Spain,1100,720,42000,9800,3200,9200,82,88,84,0,0,26.8
+Germany,950,640,38000,8600,3000,8800,80,82,83,1,0,27.4
+Brazil,1050,700,30000,6400,2900,8600,84,90,82,0,1,27.1
+Argentina,980,660,28000,5800,2800,8400,83,86,85,1,0,28.2
+Mexico,420,300,9000,1200,2600,7800,74,70,72,0,0,27.9
+Canada,380,260,8000,900,2500,7600,72,68,70,2,0,26.5

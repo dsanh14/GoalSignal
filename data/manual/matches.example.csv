@@ -1,0 +1,5 @@
+match_id,stage,team_a,team_b,historical_home_win,historical_draw,historical_away_win,historical_team_a_advances,historical_team_b_advances
+G01,group,Spain,Germany,0.46,0.27,0.27,,
+G02,group,Mexico,Canada,0.52,0.26,0.22,,
+G03,group,Brazil,Argentina,0.41,0.28,0.31,,
+K01,knockout,Spain,Germany,,,,0.58,0.42

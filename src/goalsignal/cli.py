@@ -8,6 +8,7 @@ from typing import Annotated
 import pandas as pd
 import typer
 
+from goalsignal.signals.cli import signals_app
 from goalsignal.utils.paths import resolve
 
 app = typer.Typer(help="GoalSignal: leakage-safe forecasting for international football.")
@@ -17,6 +18,7 @@ evaluate_app = typer.Typer(help="Chronological backtests and evaluations.")
 app.add_typer(data_app, name="data")
 app.add_typer(ratings_app, name="ratings")
 app.add_typer(evaluate_app, name="evaluate")
+app.add_typer(signals_app, name="signals")
 
 ConfigOpt = Annotated[
     Path, typer.Option("--config", help="Path to data configuration YAML.")
@@ -212,6 +214,115 @@ def evaluate_rolling(
     typer.echo("Reports: artifacts/reports/backtest/")
 
 
+@evaluate_app.command("ensemble-backtest")
+def evaluate_ensemble_backtest(
+    matches: Annotated[
+        Path,
+        typer.Option("--matches", help="Backtest CSV with historical probs + 'label'."),
+    ] = Path("data/manual/backtest_sample.example.csv"),
+    predictions: Annotated[
+        Path | None,
+        typer.Option(
+            "--predictions",
+            help="Real historical predictions (e.g. "
+            "artifacts/reports/backtest/test_predictions.csv); overrides --matches.",
+        ),
+    ] = None,
+    directory: Annotated[
+        Path, typer.Option("--dir", help="Directory of manual signal CSVs.")
+    ] = Path("data/manual"),
+    out_dir: Annotated[
+        Path, typer.Option("--out-dir", help="Directory for backtest artifacts.")
+    ] = Path("artifacts/ensemble"),
+) -> None:
+    """Compare ensemble versions on identical group-stage matches (fixed weights).
+
+    Pass --predictions to run on real historical model outputs; otherwise the
+    bundled sample runs as a clearly-labelled smoke test.
+    """
+    from goalsignal.evaluation.ensemble_backtest import (
+        assess_ensemble,
+        calibration_by_version,
+        coverage_by_signal,
+        load_backtest_table,
+        run_ensemble_backtest,
+        score_versions,
+        write_reports,
+    )
+    from goalsignal.signals.meta_ensemble import MetaEnsemble, load_ensemble_config
+
+    source = predictions if predictions is not None else matches
+    config = load_ensemble_config()
+    inputs = load_manual_inputs_for_cli(directory, config)
+    table = load_backtest_table(source)
+    if table.smoke:
+        typer.echo(
+            "SMOKE TEST: small/sample data — results are illustrative, not conclusive."
+        )
+    else:
+        typer.echo(f"Real backtest on {len(table.specs)} matches from {source}.")
+    ensemble = MetaEnsemble(config)
+    df = run_ensemble_backtest(table, inputs, ensemble)
+    if df.empty:
+        typer.echo("No versions had any available signal to score.", err=True)
+        raise typer.Exit(code=1)
+    coverage = coverage_by_signal(table, inputs)
+    scored = score_versions(table, inputs, ensemble)
+    calibration = calibration_by_version(scored)
+    assessment = assess_ensemble(df, coverage)
+    typer.echo(df.to_string(index=False))
+    typer.echo(f"\nVerdict: {assessment['verdict']}")
+    paths = write_reports(df, coverage, calibration, assessment, table.smoke, out_dir)
+    for label, p in paths.items():
+        typer.echo(f"  {label}: {p}")
+
+
+@evaluate_app.command("ensemble-ablation")
+def evaluate_ensemble_ablation(
+    matches: Annotated[
+        Path, typer.Option("--matches", help="Backtest CSV with historical probs + 'label'.")
+    ] = Path("data/manual/backtest_sample.example.csv"),
+    predictions: Annotated[
+        Path | None,
+        typer.Option("--predictions", help="Real historical predictions; overrides --matches."),
+    ] = None,
+    directory: Annotated[
+        Path, typer.Option("--dir", help="Directory of manual signal CSVs.")
+    ] = Path("data/manual"),
+    out_dir: Annotated[
+        Path, typer.Option("--out-dir", help="Directory for ablation artifacts.")
+    ] = Path("artifacts/ensemble"),
+) -> None:
+    """Ablation: historical only vs historical + each signal group vs full ensemble."""
+    from goalsignal.evaluation.ensemble_backtest import (
+        load_backtest_table,
+        run_ablation,
+        write_ablation,
+    )
+    from goalsignal.signals.meta_ensemble import MetaEnsemble, load_ensemble_config
+
+    config = load_ensemble_config()
+    inputs = load_manual_inputs_for_cli(directory, config)
+    table = load_backtest_table(predictions if predictions is not None else matches)
+    if table.smoke:
+        typer.echo("SMOKE TEST: sample data — ablation deltas are illustrative only.")
+    df = run_ablation(table, inputs, MetaEnsemble(config))
+    if df.empty:
+        typer.echo("No ablations scorable.", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(df.to_string(index=False))
+    paths = write_ablation(df, table.smoke, out_dir)
+    for label, p in paths.items():
+        typer.echo(f"  {label}: {p}")
+
+
+def load_manual_inputs_for_cli(directory: Path, config):
+    """Thin wrapper so commands share one manual-inputs loader."""
+    from goalsignal.signals.pipeline import load_manual_inputs
+
+    return load_manual_inputs(directory, config)
+
+
 tournament_app = typer.Typer(help="Tournament simulation.")
 predict_app = typer.Typer(help="Match and schedule predictions.")
 ledger_app = typer.Typer(help="Append-only prediction ledger.")
@@ -273,11 +384,34 @@ def tournament_simulate(
     force: Annotated[
         bool, typer.Option("--force", help="Overwrite the same versioned simulation.")
     ] = False,
+    prediction_source: Annotated[
+        str,
+        typer.Option(
+            "--prediction-source",
+            help="Probability source: 'historical' (default goal model) or "
+            "'ensemble' (blended meta-ensemble).",
+        ),
+    ] = "historical",
+    ensemble_version: Annotated[
+        str,
+        typer.Option(
+            "--ensemble-version",
+            help="Ensemble model version when --prediction-source ensemble.",
+        ),
+    ] = "final_ensemble",
     config: ConfigOpt = Path("config/data.yaml"),
     input_dir: InputDirOpt = None,
 ) -> None:
     """Simulate the full 2026 World Cup from groups through the champion."""
     import time
+
+    if prediction_source not in {"historical", "ensemble"}:
+        typer.echo(
+            f"Invalid --prediction-source {prediction_source!r}; "
+            "expected 'historical' or 'ensemble'.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
 
     from goalsignal.feedback.results import (
         active_results,
@@ -326,12 +460,29 @@ def tournament_simulate(
         for g, block in fifa_df.groupby("group", sort=True)
     }
     groups, fixtures = apply_official_group_letters(groups, fixtures, official_groups)
-    adapter = RatingsGoalAdapter(live.ratings, live.goal_model)
+    provenance_summary = None
+    if prediction_source == "ensemble":
+        from goalsignal.tournament.ensemble_source import (
+            build_ensemble_adapter,
+            ensemble_provenance_summary,
+            format_provenance_summary,
+        )
+
+        adapter, _predictor = build_ensemble_adapter(live, version=ensemble_version)
+        typer.echo(
+            f"Prediction source: ensemble (version {ensemble_version}); "
+            "historical signal from the live model."
+        )
+    else:
+        adapter = RatingsGoalAdapter(live.ratings, live.goal_model)
     started = time.perf_counter()
     result = simulate_full_tournament(
         groups, fixtures, adapter, bracket, n_sims=sims, seed=seed
     )
     runtime = time.perf_counter() - started
+    if prediction_source == "ensemble":
+        provenance_summary = ensemble_provenance_summary(adapter)
+        typer.echo(format_provenance_summary(provenance_summary))
     problems = check_full_invariants(result)
     if problems:
         for p in problems:
@@ -345,6 +496,10 @@ def tournament_simulate(
     version = simulation_version(
         result_hash, live.model_version, snapshot_id, bracket.config_hash
     )
+    if prediction_source == "ensemble":
+        # Keep ensemble runs in a distinct version so they never overwrite the
+        # canonical historical simulation artifacts.
+        version = f"{version}.ensemble-{ensemble_version}"
     out = resolve(Path("artifacts/simulations") / version)
     if (out / "wc2026_tournament_meta.json").exists() and not force:
         typer.echo(f"Refusing to overwrite {out}; pass --force.", err=True)
@@ -376,6 +531,9 @@ def tournament_simulate(
         "official_source_manifest": bracket.source_manifest,
         "runtime_seconds": runtime,
         "resolution_counts": dict(result.resolution_counts),
+        "prediction_source": prediction_source,
+        "ensemble_version": ensemble_version if prediction_source == "ensemble" else None,
+        "ensemble_provenance": provenance_summary,
         "diagnostics": live.diagnostics,
         "groups_label_note": "official groups A-L from the validated FIFA snapshot",
         "modal_bracket_note": "probabilistic summary only; no matchup is confirmed",

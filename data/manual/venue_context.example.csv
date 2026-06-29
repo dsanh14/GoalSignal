@@ -1,0 +1,5 @@
+match_id,team_a,team_b,stage,host_boost,crowd_advantage,travel_km_a,travel_km_b,rest_days_a,rest_days_b,heat_disadvantage_a,timezone_shift_a,timezone_shift_b
+G01,Spain,Germany,group,0,5,1200,2600,4,3,0,1,2
+G02,Mexico,Canada,group,40,20,300,2800,4,4,15,0,3
+G03,Brazil,Argentina,group,0,0,1800,1500,3,4,10,2,1
+K01,Spain,Germany,knockout,0,10,900,1700,5,4,0,1,2

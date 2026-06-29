@@ -1,0 +1,4 @@
+match_id,team_a,team_b,historical_home_win,historical_draw,historical_away_win,label
+G01,Spain,Germany,0.46,0.27,0.27,0
+G02,Mexico,Canada,0.52,0.26,0.22,0
+G03,Brazil,Argentina,0.41,0.28,0.31,2

@@ -1,0 +1,5 @@
+match_id,source,team_a,team_b,team_a_odds,draw_odds,team_b_odds,timestamp
+G01,examplebook,Spain,Germany,2.10,3.40,3.60,2026-06-01T12:00:00Z
+G02,examplebook,Mexico,Canada,1.80,3.50,4.50,2026-06-01T12:00:00Z
+G03,examplebook,Brazil,Argentina,2.50,3.30,2.90,2026-06-01T12:00:00Z
+K01,examplebook,Spain,Germany,1.65,,2.30,2026-07-01T12:00:00Z
