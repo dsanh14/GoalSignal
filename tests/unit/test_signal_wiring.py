@@ -145,8 +145,10 @@ def test_api_missing_manual_files_no_crash(empty_inputs):
                      historical=OutcomeProbs(0.5, 0.3, 0.2))
     pred = predictor.predict(spec, version="final_ensemble")
     assert pred.components == ["historical"]
+    # knockout_upset is configured in final_ensemble but never produced for a
+    # group match, so it renormalizes away like the other absent signals.
     assert set(pred.missing) == {"market", "squad_strength", "recent_form",
-                                 "expert", "venue_context"}
+                                 "expert", "venue_context", "knockout_upset"}
     np.testing.assert_allclose(pred.probs.as_array(), [0.5, 0.3, 0.2])
 
 

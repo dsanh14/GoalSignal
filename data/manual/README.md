@@ -16,6 +16,18 @@ directory is required by the base statistical pipeline.
 | `recent_form.csv` | `recent_form` | `team` | **opponent-adjusted** form, not raw results |
 | `venue_context.csv` | `venue_context` | `match_id` | host/travel/rest/climate, all per-match |
 | `expert_predictions.csv` | `expert` | `match_id` | structured LLM/expert probabilities + reasoning |
+| `team_styles.csv` | `knockout_upset` | `team` | 0-100 style indicators (low block, sterile possession, transition, set pieces…) |
+| `penalties.csv` | `knockout_upset` | `team` | penalty/keeper ratings + shootout records (shrunk toward 50/50) |
+
+`team_styles.csv` and `penalties.csv` feed the **knockout-only** "survive and
+advance" signal — opt-in via `--include-knockout-upset`, applied to knockout
+matches only. See [docs/ensemble_signals.md](../../docs/ensemble_signals.md)
+("Why knockout prediction is different from group-stage prediction").
+
+`knockout_matchups.example.csv` is not a signal file: it is a forecast list of
+knockout ties (`match_id, stage, team_a, team_b` + optional
+`historical_team_a_advances/team_b_advances`) used by
+`goalsignal evaluate simulation-comparison` for before/after matchup diagnostics.
 
 Validate coverage at any time with:
 

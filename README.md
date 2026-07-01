@@ -40,6 +40,7 @@ knockouts), so they can be blended, compared, and renormalized:
 | `recent_form` | opponent-adjusted recent form | `signals/recent_form.py` |
 | `expert` | structured LLM/analyst predictions | `signals/expert.py` |
 | `venue_context` | host/travel/rest/climate context | `signals/venue_context.py` |
+| `knockout_upset` | knockout-only "survive and advance" adjustment (opt-in) | `signals/knockout_upset.py` |
 
 The `historical` signal is GoalSignal's original, fully-validated statistical
 pipeline: data foundation → Elo ratings → chronological backtesting
@@ -75,10 +76,69 @@ model layer:
 
 Several named **model versions** support champion/challenger backtesting:
 `baseline_historical`, `market_only`, `squad_form_challenger`,
-`llm_adjusted_challenger`, and `final_ensemble`. The blend records full
-provenance (which signals were used, their renormalized weights, what was
-missing, and the maximum pairwise disagreement) so every probability is
-reproducible from its parts.
+`llm_adjusted_challenger`, `final_ensemble`, and the knockout-tuned
+`knockout_survival`. The blend records full provenance (which signals were used,
+their renormalized weights, what was missing, and the maximum pairwise
+disagreement) so every probability is reproducible from its parts.
+
+## Why knockout prediction is different from group-stage prediction
+
+Group-stage forecasting asks **who is better** over 90 minutes. For knockouts,
+GoalSignal models not only who is better, but **who can survive and advance**.
+Underdogs with compact defense, low expected-goals matchups, penalty strength,
+and favorable style matchups receive a controlled upset-path adjustment.
+
+The opt-in `knockout_upset` signal ([signals/knockout_upset.py](src/goalsignal/signals/knockout_upset.py))
+models advancement explicitly — `P(advance) = P(win in regulation) + P(draw) ·
+P(win in ET/penalties)` — because a team can be worse over 90 minutes yet still
+have a real path through a draw and the shootout. It:
+
+- **only applies to knockout matches** and only when you pass
+  `--include-knockout-upset` (group fixtures and the default historical path are
+  untouched);
+- is **anchored** to a base advance estimate and abstains with no style/penalty
+  evidence, so it never randomly boosts underdogs;
+- treats a low expected-goals, compact matchup as raising the draw/penalty path
+  (ratio-preserving goal split), which is where survival-minded underdogs gain;
+- uses **penalty/shootout history as a shrunk prior** — small samples pulled
+  toward 50/50, current keeper/taker weighted above old country history, and a
+  hard cap so a strong pedigree nudges (≈54/46–56/44), never dictates;
+- is **modest and bounded** — a hard-capped per-match shift at a 0.05 blend
+  weight, with explainable provenance tags (`low_block_survival_path`,
+  `favorite_sterile_possession_risk`, `penalty_path_boost`,
+  `set_piece_underdog_path`, `transition_threat`).
+
+```bash
+# Knockout survival layer on the example data:
+uv run goalsignal signals predict \
+    --matches data/manual/matches.example.csv --include-knockout-upset
+
+# The three comparable tournament simulations (historical / final / survival):
+uv run goalsignal tournament simulate --sims 100000 --seed 20260612
+uv run goalsignal tournament simulate --prediction-source ensemble \
+    --ensemble-version final_ensemble --sims 100000 --seed 20260612
+uv run goalsignal tournament simulate --prediction-source ensemble \
+    --ensemble-version knockout_survival --include-knockout-upset \
+    --sims 100000 --seed 20260612
+
+# Compare them: writes a Markdown report + CSVs to artifacts/ensemble/
+uv run goalsignal evaluate simulation-comparison        # reads existing artifacts
+uv run goalsignal evaluate simulation-comparison --live # live-model matchup diagnostics
+```
+
+The comparison report answers *which teams' champion/semifinal/final
+probabilities moved, which knockout matchups shifted, and how much came from
+`knockout_upset`* — see `artifacts/ensemble/biggest_movers.csv` and
+`knockout_survival_explanations.csv`. It is **read-only** over existing
+simulation artifacts and makes **no accuracy claim**.
+
+It is **experimental**: the coefficients are bounded priors (not fitted), it uses
+a calibrated expected-goals fallback rather than per-team xG, and it has not yet
+been validated on a chronological knockout backtest. Penalty/shootout history is
+shrunk toward 50/50 and capped — no team is assumed to win shootouts. See
+[docs/ensemble_signals.md](docs/ensemble_signals.md) for the file schemas, the
+full lookup precedence, the comparison report, and the production-grade vs
+experimental status.
 
 ## Market odds support
 

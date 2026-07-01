@@ -439,6 +439,64 @@ existing command.
   the baseline. Provide real market/squad/form/venue/expert coverage, then re-run
   the real backtest + ablation before considering promotion.
 
+#### Knockout "survive and advance" layer (2026-06-29, opt-in, experimental)
+
+- **Signal** (`signals/knockout_upset.py`): knockout-only advance adjustment.
+  Models `P(advance) = P(win reg) + P(draw)·P(win ET/pens)` with a staged
+  regulation/ET/penalty model (reuses the `tournament/knockout.py` staging;
+  skellam from scipy). Expected goals split favourite/underdog Poisson means
+  **multiplicatively** so a low-event/compact tie raises draw mass and routes the
+  favourite's edge through the coin-flip path. **Anchored**: re-derives advance
+  with vs without style/penalty evidence and applies only the difference, so no
+  evidence ⇒ exactly no change (returns `None`). Per-match shift hard-capped
+  (`max_advance_shift` 0.15); blend weight 0.05.
+- **Inputs** (file-first, team-keyed, both optional): `data/manual/team_styles.csv`
+  (0-100 style indicators) and `data/manual/penalties.csv` (current keeper/taker
+  ratings + shootout records). Shootout history is **Beta-shrunk toward 50/50**
+  (`shootout_prior_strength`), current ratings weighted above old country history,
+  head-to-head shootout deviation capped (`shootout_cap` 0.12). Penalties only
+  move advance meaningfully when draw/ET prob is high. Provenance tags:
+  `low_block_survival_path`, `favorite_sterile_possession_risk`,
+  `transition_threat`, `set_piece_underdog_path`, `penalty_path_boost`.
+- **Config** (`config/ensemble.yaml`): `knockout_upset: 0.05` added to
+  `final_ensemble`; new `knockout_survival` version (market/upset-leaning);
+  `signal_params.knockout_upset` block of bounded, **unfitted** coefficients.
+  Absent for group matches and for non-opted knockout runs ⇒ renormalized away ⇒
+  default behavior byte-for-byte unchanged.
+- **CLI**: `goalsignal signals predict|blend --include-knockout-upset` and
+  `goalsignal tournament simulate --prediction-source ensemble
+  --include-knockout-upset` (group stage + historical path untouched; ensemble
+  upset runs write a distinct `*.ko-upset` artifact dir). Lookup precedence
+  documented: match_id > pair+stage > pair > team-level features.
+- **Tests:** `tests/unit/test_knockout_upset.py` (21). Suite **300 passed**,
+  ruff clean.
+- **Open / experimental:** coefficients are priors, not fitted; uses a calibrated
+  eg fallback (no per-team xG); not yet validated on a chronological knockout
+  backtest (shootout outcomes are rare). Do not promote as default.
+
+#### Simulation comparison report (2026-06-29, read-only diagnostics)
+
+- **Module** (`evaluation/simulation_comparison.py`) + CLI `goalsignal evaluate
+  simulation-comparison`. **Read-only** over existing `artifacts/simulations/`
+  runs — never re-runs or overwrites the simulator. Auto-discovers newest
+  baseline (historical) / final_ensemble / knockout_survival runs by classifying
+  their `wc2026_tournament_meta.json` (override with
+  `--baseline/--final-ensemble/--knockout-survival`). Graceful on a missing run.
+- **Writes 4 artifacts to `artifacts/ensemble/`:** `simulation_comparison.csv`
+  (per-team semifinal/final/champion + pairwise deltas), `biggest_movers.csv`
+  (`team,stage,comparison,from_prob,to_prob,delta,abs_delta`),
+  `knockout_survival_explanations.csv` (per-matchup before/after advance +
+  knockout_upset decomposition: internal shift, `net_move_from_upset`, draw prob,
+  E[goals], penalty-path contribution, style/penalty/provenance tags),
+  `simulation_comparison.md` (honest narrative). Matchup diagnostics use
+  `--matches` (default `data/manual/knockout_matchups.example.csv`) or `--live`.
+- **Honesty:** the MD report has explicit production-grade vs experimental
+  sections and a "not claimed" block (no accuracy claim; penalty history not
+  highly predictive; no guaranteed shootout winners). Separates the *version*
+  effect from the *knockout_upset* effect (`net_move_from_upset`).
+- **Tests:** `tests/unit/test_simulation_comparison.py` (8). Suite **308 passed**,
+  ruff clean.
+
 ## Conventions
 
 - Python 3.12, uv-managed. Ruff (line length 100); pytest; all tests must pass

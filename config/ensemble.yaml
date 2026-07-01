@@ -13,6 +13,12 @@
 #   recent_form     — opponent-adjusted recent form
 #   expert          — LLM/expert consensus
 #   venue_context   — host/travel/rest/climate context
+#   knockout_upset  — knockout-only "survive and advance" adjustment (opt-in)
+#
+# knockout_upset is produced ONLY for knockout matches and ONLY when the caller
+# opts in (`--include-knockout-upset`). When it is absent the missing-signal
+# renormalization drops its weight, so group matches and non-opted knockout runs
+# are unchanged. It is therefore safe to list its weight here.
 
 # Default product weights (the "final_ensemble" model version).
 default_weights:
@@ -44,6 +50,18 @@ model_versions:
     recent_form: 0.10
     expert: 0.10
     venue_context: 0.05
+    knockout_upset: 0.05  # only present for opted-in knockout matches
+  # Knockout-tuned profile that leans on the survival adjustment. Use with
+  # --ensemble-version knockout_survival --include-knockout-upset. For group
+  # matches knockout_upset is absent and the rest renormalize.
+  knockout_survival:
+    historical: 0.35
+    market: 0.30
+    squad_strength: 0.10
+    recent_form: 0.08
+    venue_context: 0.05
+    expert: 0.07
+    knockout_upset: 0.05
 
 # Parameters for the adjustment-style signals (squad/form/venue), which convert
 # a scalar strength edge into a W/D/L distribution via the Davidson map.
@@ -56,6 +74,27 @@ signal_params:
     travel_per_1000km: 8.0
     rest_per_day: 6.0
     timezone_per_hour: 3.0
+  # Knockout "survive and advance" coefficients. All modest and bounded; the
+  # adjustment is anchored so no style/penalty evidence => exactly no change, and
+  # the per-match advance shift is hard-capped by max_advance_shift.
+  knockout_upset:
+    base_expected_goals: 2.6      # typical two-team knockout goal total
+    edge_per_advance: 1.6         # base advance gap -> dimensionless skill gap
+    low_block_eg: 0.7             # underdog low block suppresses goals (more pens)
+    compactness_eg: 0.5
+    sterile_eg: 0.4               # favourite sterile possession suppresses goals
+    transition_eg: 0.3
+    creation_eg: 0.3
+    struggles_block_edge: 0.45    # favourite struggles vs an actual low block
+    sterile_edge: 0.30
+    transition_edge: 0.30
+    set_piece_edge: 0.30
+    shootout_beta: 0.10           # per unit shootout-rating gap
+    shootout_cap: 0.12            # hard cap on shootout deviation from 0.5
+    shootout_prior_strength: 6.0  # pseudo-matches shrinking history to 50/50
+    current_pen_weight: 0.7       # current keeper/taker over old country history
+    history_pen_weight: 0.3
+    max_advance_shift: 0.15       # hard cap on the per-match advance shift
 
 # Market overround removal: "proportional" (booksum scaling) or "power" (Shin).
 market_overround_method: proportional

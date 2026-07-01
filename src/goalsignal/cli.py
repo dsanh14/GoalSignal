@@ -316,6 +316,115 @@ def evaluate_ensemble_ablation(
         typer.echo(f"  {label}: {p}")
 
 
+@evaluate_app.command("simulation-comparison")
+def evaluate_simulation_comparison(
+    sim_root: Annotated[
+        Path,
+        typer.Option("--sim-root", help="Directory of tournament simulation artifacts."),
+    ] = Path("artifacts/simulations"),
+    baseline: Annotated[
+        Path | None,
+        typer.Option("--baseline", help="Override the historical-baseline run directory."),
+    ] = None,
+    final_ensemble: Annotated[
+        Path | None,
+        typer.Option("--final-ensemble", help="Override the final_ensemble run directory."),
+    ] = None,
+    knockout_survival: Annotated[
+        Path | None,
+        typer.Option(
+            "--knockout-survival", help="Override the knockout_survival run directory."
+        ),
+    ] = None,
+    matches: Annotated[
+        Path,
+        typer.Option("--matches", help="Knockout matchups CSV for before/after diagnostics."),
+    ] = Path("data/manual/knockout_matchups.example.csv"),
+    directory: Annotated[
+        Path, typer.Option("--dir", help="Directory of manual signal CSVs.")
+    ] = Path("data/manual"),
+    live: Annotated[
+        bool,
+        typer.Option(
+            "--live/--no-live",
+            help="Use the trained live model for the diagnostic baseline advance "
+            "(default: historical advance columns from the matches CSV).",
+        ),
+    ] = False,
+    top: Annotated[int, typer.Option("--top", help="Number of biggest movers to keep.")] = 15,
+    out_dir: Annotated[
+        Path, typer.Option("--out-dir", help="Directory for comparison artifacts.")
+    ] = Path("artifacts/ensemble"),
+) -> None:
+    """Compare historical / final_ensemble / knockout_survival simulations.
+
+    Read-only over existing simulation artifacts — it never re-runs or overwrites
+    them. Writes a Markdown report and CSV artifacts (team comparison, biggest
+    movers, and per-matchup knockout_upset explanations). Honest by design: it
+    explains what moved and why, and never claims an accuracy improvement.
+    """
+    from goalsignal.evaluation.simulation_comparison import (
+        biggest_movers,
+        discover_sim_runs,
+        load_sim_run,
+        matchup_diagnostics,
+        team_comparison,
+        write_comparison_artifacts,
+    )
+    from goalsignal.signals.meta_ensemble import MetaEnsemble, load_ensemble_config
+    from goalsignal.signals.pipeline import load_manual_inputs, load_matches
+
+    discovered = discover_sim_runs(sim_root)
+    overrides = {
+        "baseline": baseline,
+        "final_ensemble": final_ensemble,
+        "knockout_survival": knockout_survival,
+    }
+    runs = {}
+    for label in ("baseline", "final_ensemble", "knockout_survival"):
+        path = overrides[label] or discovered.get(label)
+        runs[label] = load_sim_run(label, path)
+        status = f"`{Path(path).name}`" if path else "MISSING"
+        typer.echo(f"  {label:18s}: {status}"
+                   + (f" (n_sims={runs[label].n_sims})" if runs[label].available else ""))
+
+    comparison = team_comparison(runs)
+    movers = biggest_movers(comparison, top=top)
+
+    config = load_ensemble_config()
+    ensemble = MetaEnsemble(config)
+    inputs_plain = load_manual_inputs(directory, config, include_knockout_upset=False)
+    inputs_upset = load_manual_inputs(directory, config, include_knockout_upset=True)
+    historical = None
+    illustrative = True
+    if live:
+        from goalsignal.signals.historical_adapter import LiveModelHistorical
+
+        _m, live_model = _live_model(Path("config/data.yaml"), None)
+        historical = LiveModelHistorical(live_model)
+        illustrative = False
+        typer.echo("Diagnostic baseline: live model")
+    specs = load_matches(matches) if matches.exists() else []
+    diagnostics = matchup_diagnostics(
+        specs, inputs_plain, inputs_upset, ensemble, historical=historical
+    )
+
+    paths = write_comparison_artifacts(
+        runs, comparison, movers, diagnostics,
+        out_dir=out_dir, diagnostics_illustrative=illustrative,
+    )
+    if not comparison.empty:
+        typer.echo(f"Compared {len(comparison)} teams; top movers:")
+        if not movers.empty:
+            typer.echo(movers.head(min(top, 10)).to_string(index=False))
+    else:
+        typer.echo("No two simulation runs were both present — comparison is empty.")
+    typer.echo(f"Diagnosed {len(diagnostics)} knockout matchups"
+               + (" (illustrative example data)" if illustrative else " (live model)"))
+    for label, p in paths.items():
+        typer.echo(f"  {label}: {p}")
+
+
 def load_manual_inputs_for_cli(directory: Path, config):
     """Thin wrapper so commands share one manual-inputs loader."""
     from goalsignal.signals.pipeline import load_manual_inputs
@@ -399,6 +508,14 @@ def tournament_simulate(
             help="Ensemble model version when --prediction-source ensemble.",
         ),
     ] = "final_ensemble",
+    include_knockout_upset: Annotated[
+        bool,
+        typer.Option(
+            "--include-knockout-upset/--no-knockout-upset",
+            help="Add the knockout 'survive and advance' signal to ensemble knockout "
+            "ties (requires --prediction-source ensemble; group stage unaffected).",
+        ),
+    ] = False,
     config: ConfigOpt = Path("config/data.yaml"),
     input_dir: InputDirOpt = None,
 ) -> None:
@@ -468,12 +585,21 @@ def tournament_simulate(
             format_provenance_summary,
         )
 
-        adapter, _predictor = build_ensemble_adapter(live, version=ensemble_version)
+        adapter, _predictor = build_ensemble_adapter(
+            live, version=ensemble_version, include_knockout_upset=include_knockout_upset
+        )
         typer.echo(
             f"Prediction source: ensemble (version {ensemble_version}); "
             "historical signal from the live model."
+            + ("  knockout_upset: ON" if include_knockout_upset else "")
         )
     else:
+        if include_knockout_upset:
+            typer.echo(
+                "NOTE: --include-knockout-upset is ignored without "
+                "--prediction-source ensemble.",
+                err=True,
+            )
         adapter = RatingsGoalAdapter(live.ratings, live.goal_model)
     started = time.perf_counter()
     result = simulate_full_tournament(
@@ -500,6 +626,8 @@ def tournament_simulate(
         # Keep ensemble runs in a distinct version so they never overwrite the
         # canonical historical simulation artifacts.
         version = f"{version}.ensemble-{ensemble_version}"
+        if include_knockout_upset:
+            version = f"{version}.ko-upset"
     out = resolve(Path("artifacts/simulations") / version)
     if (out / "wc2026_tournament_meta.json").exists() and not force:
         typer.echo(f"Refusing to overwrite {out}; pass --force.", err=True)
@@ -533,6 +661,9 @@ def tournament_simulate(
         "resolution_counts": dict(result.resolution_counts),
         "prediction_source": prediction_source,
         "ensemble_version": ensemble_version if prediction_source == "ensemble" else None,
+        "include_knockout_upset": (
+            include_knockout_upset if prediction_source == "ensemble" else None
+        ),
         "ensemble_provenance": provenance_summary,
         "diagnostics": live.diagnostics,
         "groups_label_note": "official groups A-L from the validated FIFA snapshot",

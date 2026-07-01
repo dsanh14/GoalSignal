@@ -22,6 +22,14 @@ from goalsignal.signals.base import (
 )
 from goalsignal.signals.expert import expert_consensus, load_expert_predictions
 from goalsignal.signals.keying import PairIndex
+from goalsignal.signals.knockout_upset import (
+    KnockoutUpsetParams,
+    PenaltyTable,
+    TeamStyleTable,
+    knockout_upset_signal,
+    load_penalties,
+    load_team_styles,
+)
 from goalsignal.signals.market import load_market_odds
 from goalsignal.signals.meta_ensemble import (
     BlendResult,
@@ -43,6 +51,7 @@ SIGNAL_NAMES = (
     "recent_form",
     "expert",
     "venue_context",
+    "knockout_upset",
 )
 
 # File name (without extension) per signal under the manual directory. A real
@@ -54,6 +63,8 @@ _FILES = {
     "recent_form": "recent_form",
     "venue_context": "venue_context",
     "expert": "expert_predictions",
+    "team_styles": "team_styles",
+    "penalties": "penalties",
 }
 
 
@@ -110,6 +121,9 @@ class ManualInputs:
     market_index: PairIndex
     expert_index: PairIndex
     venue_index: PairIndex
+    styles: TeamStyleTable
+    penalties: PenaltyTable
+    include_knockout_upset: bool = False
 
     @property
     def venue_coeffs(self) -> VenueCoefficients:
@@ -120,12 +134,26 @@ class ManualInputs:
             timezone_per_hour=float(v.get("timezone_per_hour", 3.0)),
         )
 
+    @property
+    def knockout_upset_params(self) -> KnockoutUpsetParams:
+        return KnockoutUpsetParams.from_mapping(
+            self.config.signal_params.get("knockout_upset")
+        )
+
 
 def load_manual_inputs(
     directory: str | Path = "data/manual",
     config: EnsembleConfig | None = None,
+    *,
+    include_knockout_upset: bool = False,
 ) -> ManualInputs:
-    """Load every manual signal file from ``directory`` (graceful if absent)."""
+    """Load every manual signal file from ``directory`` (graceful if absent).
+
+    ``include_knockout_upset`` opts the knockout survival signal into the blend;
+    when ``False`` (default) the signal is never produced and the ensemble is
+    byte-for-byte unchanged. The style/penalty tables are always loaded (cheap)
+    so they can be inspected regardless of the flag.
+    """
     cfg = config or load_ensemble_config()
     d = Path(directory)
     errors: dict[str, list[str]] = {}
@@ -138,6 +166,8 @@ def load_manual_inputs(
     expert = load_expert_predictions(
         _resolve_manual_file(d, _FILES["expert"]), on_error=expert_err
     )
+    styles = load_team_styles(_resolve_manual_file(d, _FILES["team_styles"]))
+    penalties = load_penalties(_resolve_manual_file(d, _FILES["penalties"]))
     if market_err:
         errors["market"] = market_err
     if expert_err:
@@ -153,6 +183,9 @@ def load_manual_inputs(
         market_index=_market_index(market),
         expert_index=_expert_index(expert),
         venue_index=_venue_index(venue),
+        styles=styles,
+        penalties=penalties,
+        include_knockout_upset=include_knockout_upset,
     )
 
 
@@ -272,7 +305,7 @@ def build_signals(
                              scale=scale, nu=nu)
         )
 
-    return {
+    signals: dict[str, OutcomeProbs | AdvanceProbs | None] = {
         "historical": spec.historical,
         "market": market,
         "squad_strength": as_mode(squad),
@@ -280,6 +313,43 @@ def build_signals(
         "venue_context": venue,
         "expert": expert,
     }
+
+    # Knockout-only survival adjustment (opt-in). Anchored to the best available
+    # advance estimate so it never randomly boosts underdogs.
+    if ko and inputs.include_knockout_upset:
+        signals["knockout_upset"] = _knockout_upset(spec, signals, inputs)
+
+    return signals
+
+
+def _base_advance(
+    spec: MatchSpec, signals: dict[str, OutcomeProbs | AdvanceProbs | None]
+) -> AdvanceProbs:
+    """Best available advance estimate to anchor the knockout survival signal.
+
+    Precedence: the historical model, then market, then squad strength; falls
+    back to a 50/50 prior when nothing is available.
+    """
+    for name in ("historical", "market", "squad_strength"):
+        probs = signals.get(name)
+        if isinstance(probs, AdvanceProbs):
+            return probs
+    return AdvanceProbs(0.5, 0.5)
+
+
+def _knockout_upset(
+    spec: MatchSpec,
+    signals: dict[str, OutcomeProbs | AdvanceProbs | None],
+    inputs: ManualInputs,
+) -> AdvanceProbs | None:
+    return knockout_upset_signal(
+        spec.team_a,
+        spec.team_b,
+        base_advance=_base_advance(spec, signals),
+        styles=inputs.styles,
+        penalties=inputs.penalties,
+        params=inputs.knockout_upset_params,
+    )
 
 
 def blend_match(

@@ -25,11 +25,21 @@ from goalsignal.signals.base import (
     davidson_outcome,
     disagreement,
 )
+from goalsignal.signals.knockout_upset import (
+    KnockoutUpset,
+    KnockoutUpsetParams,
+    knockout_upset_detail,
+    knockout_upset_signal,
+)
 
 __all__ = [
     "AdvanceProbs",
+    "KnockoutUpset",
+    "KnockoutUpsetParams",
     "OutcomeProbs",
     "advance_from_outcome",
     "davidson_outcome",
     "disagreement",
+    "knockout_upset_detail",
+    "knockout_upset_signal",
 ]
