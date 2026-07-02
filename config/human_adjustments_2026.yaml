@@ -1,0 +1,87 @@
+# Winner-only human adjustment layer for the 2026 knockout bracket.
+#
+# This file holds *editable opinions*, not model output. Every entry is applied
+# transparently by `goalsignal tournament human-adjust` on top of an existing
+# simulation artifact directory and reported with its reason. Nothing here
+# touches the deployed model, the ledger, or existing simulation artifacts.
+#
+# Units: `points` are percentage points added to (positive) or removed from
+# (negative) that team's advance probability for that match, before caps and
+# renormalization. The two teams' net points are differenced, capped at
+# `max_total_adjustment_pct`, and the result is clipped into
+# [min_probability, max_probability].
+#
+# Allowed categories and modifiers (modifier optional; a known modifier name
+# may also be used directly as `category`):
+#   venue:            home_host_boost, altitude_boost, travel_rest_penalty
+#   injuries:         attack_downgrade, defense_downgrade, goalkeeper_downgrade
+#   tournament_form:  dominant_win_boost, late_comeback_boost,
+#                     late_collapse_penalty, extra_time_fatigue_penalty,
+#                     penalty_survival_boost
+#   opponent_quality: hard_group_boost, easy_path_penalty, battle_tested_boost
+#   style_matchup:    low_block_vs_possession_boost, transition_threat_boost,
+#                     set_piece_boost, sterile_possession_penalty
+#   expert_override:  manual_nudge
+#
+# `confidence` is optional (low|medium|high) and is carried into the report
+# without scaling the points.
+
+global:
+  max_total_adjustment_pct: 15
+  max_single_adjustment_pct: 10
+  min_probability: 0.05
+  max_probability: 0.95
+
+matches:
+  92:
+    label: "Mexico vs England"
+    adjustments:
+      - team: Mexico
+        category: venue
+        modifier: altitude_boost
+        points: 7
+        confidence: high
+        reason: "Mexico City altitude and home crowd."
+      - team: Mexico
+        category: tournament_form
+        modifier: dominant_win_boost
+        points: 3
+        confidence: medium
+        reason: "Mexico handled Ecuador cleanly."
+      - team: England
+        category: tournament_form
+        modifier: late_comeback_boost
+        points: -4
+        confidence: medium
+        reason: "England trailed DR Congo until minute 75 before late comeback."
+
+  93:
+    label: "Portugal vs Spain"
+    adjustments:
+      - team: Portugal
+        category: style_matchup
+        modifier: transition_threat_boost
+        points: 6
+        confidence: medium
+        reason: "Portugal transition/finishing threat against Spain possession."
+      - team: Spain
+        category: injuries
+        modifier: attack_downgrade
+        points: -6
+        confidence: medium
+        reason: "Spain winger injuries reduce direct chance creation."
+
+  100:
+    label: "Argentina vs Colombia"
+    adjustments:
+      - team: Colombia
+        category: opponent_quality
+        modifier: battle_tested_boost
+        points: 5
+        confidence: medium
+        reason: "Colombia more battle-tested; Argentina had easy path."
+      - team: Argentina
+        category: easy_path_penalty
+        points: -4
+        confidence: low
+        reason: "Argentina not seriously challenged before QF."

@@ -764,6 +764,75 @@ def tournament_matchup_probabilities(
     )
 
 
+@tournament_app.command("human-adjust")
+def tournament_human_adjust(
+    simulation_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--simulation-dir",
+            help="Existing simulation artifact directory (or version name under "
+            "artifacts/simulations). Defaults to the newest full tournament run.",
+        ),
+    ] = None,
+    config: Annotated[
+        Path,
+        typer.Option("--config", help="Human adjustments YAML."),
+    ] = Path("config/human_adjustments_2026.yaml"),
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="Overwrite existing human-adjusted artifacts."),
+    ] = False,
+) -> None:
+    """Apply the winner-only human adjustment layer to an existing simulation.
+
+    Reads matchup probabilities from the simulation directory (never re-runs
+    the simulator), applies the YAML-configured modifiers, fixes one predicted
+    winner per knockout match, and writes human_adjusted_bracket.{csv,md}.
+    """
+    from goalsignal.tournament.bracket_2026 import OfficialBracket
+    from goalsignal.tournament.human_adjustments import (
+        HumanAdjustmentsConfig,
+        adjust_bracket,
+        load_simulation_baseline,
+        write_human_adjusted,
+    )
+
+    if simulation_dir is None:
+        sim_path = _latest_tournament_dir()
+    elif simulation_dir.exists():
+        sim_path = simulation_dir
+    else:
+        sim_path = _latest_tournament_dir(str(simulation_dir))
+    try:
+        adjustments = HumanAdjustmentsConfig.load(config)
+        baseline = load_simulation_baseline(sim_path)
+        bracket = OfficialBracket.load()
+        result = adjust_bracket(baseline, adjustments, bracket.matches)
+        paths = write_human_adjusted(result, force=force)
+    except (ValueError, FileNotFoundError, FileExistsError) as error:
+        typer.echo(f"human-adjust failed: {error}", err=True)
+        raise typer.Exit(code=1) from error
+    adjusted = [m for m in result.matches if m.applied]
+    typer.echo(f"Simulation: {sim_path}")
+    typer.echo(
+        f"Knockout matches: {len(result.matches)}; adjusted: {len(adjusted)}; "
+        f"winners changed: {sum(1 for m in result.matches if m.winner_changed)}"
+    )
+    for match in adjusted:
+        flip = " (FLIPPED)" if match.winner_changed else ""
+        typer.echo(
+            f"M{match.match_number}: {match.team_1} vs {match.team_2} | "
+            f"p({match.team_1}) {match.baseline_p_team_1:.3f} -> "
+            f"{match.adjusted_p_team_1:.3f} | winner {match.predicted_winner}{flip}"
+        )
+    for warning in result.warnings:
+        typer.echo(f"WARNING: {warning}", err=True)
+    if result.champion:
+        typer.echo(f"Predicted champion: {result.champion}")
+    for kind, path in paths.items():
+        typer.echo(f"{kind}: {path}")
+
+
 @tournament_app.command("bracket")
 def tournament_bracket(
     version: Annotated[str | None, typer.Option(help="Simulation version.")] = None,

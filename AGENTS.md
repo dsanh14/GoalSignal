@@ -497,6 +497,43 @@ existing command.
 - **Tests:** `tests/unit/test_simulation_comparison.py` (8). Suite **308 passed**,
   ruff clean.
 
+#### Winner-only human adjustment layer (2026-07-02, opt-in challenger)
+
+- **Module** (`tournament/human_adjustments.py`) + CLI `goalsignal tournament
+  human-adjust --simulation-dir <dir> --config config/human_adjustments_2026.yaml
+  [--force]`. **Read-only over an existing simulation directory** — never re-runs
+  or overwrites the simulator; never touches `Datasets/`, the ledger, the result
+  store, or the deployed model. Defaults to the newest full-tournament run.
+- **Opinions live in YAML, not Python** (`config/human_adjustments_2026.yaml`):
+  per-match, per-team signed percentage-point adjustments with required `reason`,
+  optional `modifier`/`confidence` (low|medium|high, annotation only — no
+  scaling). Taxonomy: venue / injuries / tournament_form / opponent_quality /
+  style_matchup / expert_override with fixed modifier lists (a known modifier
+  name may be used directly as `category`). Global caps:
+  `max_total_adjustment_pct` (per-team sum AND net delta), `max_single_adjustment_pct`,
+  `min/max_probability` clipping. Strict validation (unknown category/team,
+  missing reason, out-of-range points, non-knockout match numbers all error).
+- **Method:** baseline = each pairing's simulated
+  `conditional_slot_1_win_probability` (advance = reg+ET+pens as simulated) from
+  the round matchup CSVs, either orientation; unseen pairings fall back to a
+  flagged neutral 0.5. Winners are fixed by adjusted probability and propagated
+  deterministically through the official `OfficialBracket` M73-M104 graph
+  (R32 entrants from the run's modal bracket — never fabricated). Adjustments
+  whose team is not in the propagated pairing are skipped with a warning.
+- **Artifacts** (inside the sim dir, refuse overwrite without `--force`):
+  `human_adjusted_bracket.csv`, `human_adjusted_bracket.md` (provenance + method
+  + full bracket path + per-adjustment audit trail + warnings + caveats),
+  `human_adjusted_meta.json` (config hash, source-sim provenance, counts).
+- **Verified real run** on `b1bfd6e3fb69c758.ensemble-knockout_survival.ko-upset`:
+  32 knockout matches, 3 adjusted (M92/M93/M100 per config), 1 winner flipped
+  (M92 England→Mexico, 0.392→0.532), champion Argentina; M99 correctly
+  re-paired to Brazil vs Mexico downstream.
+- **Tests:** `tests/unit/test_human_adjustments.py` (19, synthetic fictional
+  teams). Suite **327 passed**, ruff clean.
+- **Honesty:** winner-only opinion layer — not a fitted model, no accuracy claim,
+  probabilities are not calibrated forecasts, nothing written to the ledger, and
+  no challenger promotion.
+
 ## Conventions
 
 - Python 3.12, uv-managed. Ruff (line length 100); pytest; all tests must pass
