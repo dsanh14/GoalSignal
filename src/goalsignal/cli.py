@@ -833,6 +833,125 @@ def tournament_human_adjust(
         typer.echo(f"{kind}: {path}")
 
 
+@tournament_app.command("compare-scenarios")
+def tournament_compare_scenarios(
+    simulation_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--simulation-dir",
+            help="Primary simulation directory holding the human-adjusted "
+            "scenario (and the default output location). Defaults to the "
+            "newest full tournament run.",
+        ),
+    ] = None,
+    baseline_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--baseline-dir",
+            help="Model-only (historical) run. Auto-discovered when omitted.",
+        ),
+    ] = None,
+    knockout_survival_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--knockout-survival-dir",
+            help="Knockout-survival ensemble run. Auto-discovered when omitted.",
+        ),
+    ] = None,
+    out_dir: Annotated[
+        Path | None,
+        typer.Option("--out-dir", help="Output directory (default: --simulation-dir)."),
+    ] = None,
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="Overwrite existing comparison artifacts."),
+    ] = False,
+) -> None:
+    """Compare the model-only, knockout-survival, and human-adjusted brackets.
+
+    Read-only presentation over existing artifacts: missing scenarios are
+    reported as unavailable rather than failing the report. Writes
+    scenario_comparison.{md,csv}, scenario_biggest_movers.csv, and
+    scenario_flips.csv.
+    """
+    from goalsignal.evaluation.simulation_comparison import discover_sim_runs
+    from goalsignal.tournament.bracket_2026 import OfficialBracket
+    from goalsignal.tournament.scenario_comparison import (
+        biggest_movers_frame,
+        comparison_frame,
+        load_human_scenario,
+        load_modal_scenario,
+        trace_downstream_effects,
+        write_scenario_comparison,
+    )
+
+    try:
+        if simulation_dir is None:
+            sim_path = _latest_tournament_dir()
+        elif simulation_dir.exists():
+            sim_path = simulation_dir
+        else:
+            sim_path = _latest_tournament_dir(str(simulation_dir))
+        discovered = discover_sim_runs()
+        model_only = load_modal_scenario(
+            "model_only", baseline_dir or discovered.get("baseline")
+        )
+        knockout_survival = load_modal_scenario(
+            "knockout_survival",
+            knockout_survival_dir or discovered.get("knockout_survival"),
+        )
+        human = load_human_scenario(sim_path)
+        comparison = comparison_frame(model_only, knockout_survival, human)
+        if comparison.empty:
+            typer.echo(
+                "compare-scenarios failed: no scenario artifacts found "
+                f"(simulation dir {sim_path}).",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        movers = biggest_movers_frame(comparison, model_only, knockout_survival)
+        # The reference for downstream tracing is the run the opinion overlay
+        # was applied to: the primary simulation directory itself.
+        reference = load_modal_scenario("reference", sim_path)
+        traces = trace_downstream_effects(
+            human, reference, OfficialBracket.load().matches
+        )
+        paths = write_scenario_comparison(
+            comparison,
+            movers,
+            traces,
+            model_only,
+            knockout_survival,
+            human,
+            out_dir or sim_path,
+            force=force,
+        )
+    except (ValueError, FileNotFoundError, FileExistsError) as error:
+        typer.echo(f"compare-scenarios failed: {error}", err=True)
+        raise typer.Exit(code=1) from error
+    for label, scenario in (
+        ("model-only", model_only),
+        ("knockout-survival", knockout_survival),
+    ):
+        status = scenario.path if scenario.available else "UNAVAILABLE"
+        typer.echo(f"{label}: {status}")
+    typer.echo(
+        "human-adjusted scenario: "
+        + (str(human.path) if human.available else "UNAVAILABLE")
+    )
+    flips = comparison[comparison["flipped_by_opinion"]]
+    typer.echo(
+        f"Matches compared: {len(comparison)}; opinion flips: {len(flips)}"
+    )
+    for trace in traces:
+        typer.echo(
+            f"M{trace.match_number}: {trace.flipped_from} -> {trace.flipped_to}; "
+            f"{len(trace.effects)} downstream pairing change(s)"
+        )
+    for kind, path in paths.items():
+        typer.echo(f"{kind}: {path}")
+
+
 @tournament_app.command("bracket")
 def tournament_bracket(
     version: Annotated[str | None, typer.Option(help="Simulation version.")] = None,

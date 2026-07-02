@@ -534,6 +534,49 @@ existing command.
   probabilities are not calibrated forecasts, nothing written to the ledger, and
   no challenger promotion.
 
+#### Scenario comparison report (2026-07-02, read-only presentation)
+
+- **Module** (`tournament/scenario_comparison.py`) + CLI `goalsignal tournament
+  compare-scenarios --simulation-dir <dir> [--baseline-dir --knockout-survival-dir
+  --out-dir --force]`. Compares three knockout views per match: **model-only**
+  modal bracket (historical run), **knockout_survival** modal bracket, and the
+  **human-adjusted scenario** (`human_adjusted_bracket.csv`). Baseline/ko runs
+  auto-discovered via `evaluation.simulation_comparison.discover_sim_runs`;
+  any missing scenario is reported as unavailable, never fatal (fails only when
+  *no* scenario exists). Read-only over all inputs.
+- **Artifacts** (default into the primary sim dir; refuse overwrite without
+  `--force`): `scenario_comparison.md` (headline, champions per scenario,
+  availability, opinion flips + downstream effects, biggest movers, per-match
+  table, "Scenario, not forecast" + caveats), `scenario_comparison.csv`
+  (per-match winners/probs/net points/flip/reason/confidence/provenance),
+  `scenario_biggest_movers.csv` (`comparison, match_number, stage, subject,
+  from_prob, to_prob, delta` — human overlay vs its baseline AND
+  knockout_survival vs model_only on shared modal pairings),
+  `scenario_flips.csv` (flipped matches + `downstream_effects`).
+- **Exact flip attribution:** `human-adjust` now also records the parallel
+  **unadjusted walk** per match (`unadjusted_team_1/2`, `unadjusted_winner`
+  columns + `adjustment_reasons`/`adjustment_confidences`; additive, older
+  CSVs still load). Downstream tracing diffs adjusted vs unadjusted walks —
+  exact attribution — and falls back to the run's modal bracket (flagged,
+  since modal chains can differ independently of a flip) for old CSVs.
+- **Language policy:** reports use "human-adjusted scenario" / "opinion
+  overlay" / "scenario analysis layer", never claim accuracy, and state that
+  the ledger and original simulation artifacts are untouched.
+- **Verified real run** on `b1bfd6e3fb69c758.ensemble-knockout_survival.ko-upset`
+  vs baseline `b1bfd6e3fb69c758`: 32 matches, 3 adjusted, 1 flip (M92
+  England→Mexico) with exactly 3 attributable downstream pairing changes
+  (M99, M102, M103), champion unchanged (Argentina in all three scenarios),
+  0 model-only vs ko-survival modal-pick disagreements.
+- **Tests:** `tests/unit/test_scenario_comparison.py` (12, synthetic fictional
+  teams: all files written, missing-human and missing-ko grace, flips CSV,
+  movers columns/ordering, exact + fallback downstream tracing, scenario
+  language, Markdown table column consistency (reason pipes re-joined with
+  semicolons), source-artifact immutability, `--force` semantics). Suite
+  **339 passed**, ruff clean.
+- **Demo docs:** `docs/demo_walkthrough.md` — 5-minute reviewer walkthrough
+  with a real `scenario_comparison.md` excerpt and a "How to reproduce the
+  Mexico upset scenario" section; linked from the top of `README.md`.
+
 ## Conventions
 
 - Python 3.12, uv-managed. Ruff (line length 100); pytest; all tests must pass

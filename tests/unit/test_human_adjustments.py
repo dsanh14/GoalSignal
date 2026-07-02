@@ -334,7 +334,18 @@ def test_write_artifacts_and_force_semantics(tmp_path):
     frame = pd.read_csv(paths["csv"])
     assert list(frame["match_number"]) == [101, 102, 104]
     assert {"predicted_winner", "adjusted_p_team_1", "winner_changed",
-            "baseline_source", "notes"} <= set(frame.columns)
+            "baseline_source", "adjustment_reasons", "adjustment_confidences",
+            "unadjusted_team_1", "unadjusted_team_2", "unadjusted_winner",
+            "notes"} <= set(frame.columns)
+    flipped = frame[frame["match_number"] == 101].iloc[0]
+    assert "synthetic reason" in flipped["adjustment_reasons"]
+    assert flipped["adjustment_confidences"] == "medium"
+    # The unadjusted walk records the no-opinion final (Astoria vs Cascadia).
+    final = frame[frame["match_number"] == 104].iloc[0]
+    assert (final["team_1"], final["team_2"]) != (
+        final["unadjusted_team_1"], final["unadjusted_team_2"]
+    )
+    assert final["unadjusted_winner"] == "Astoria"
     md = paths["md"].read_text(encoding="utf-8")
     assert "synthetic reason" in md
     assert "Predicted champion" in md

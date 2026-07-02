@@ -334,6 +334,55 @@ If a run is missing, its comparisons are omitted and the report says so — the
 command never crashes on a partial set. It deliberately makes **no accuracy
 claim**: it shows what moved and why, not that the movement is correct.
 
+## Human-adjusted scenario analysis
+
+A winner-only **scenario analysis layer** — an **opinion overlay** on an
+existing simulation, distinct from the fitted/blended signals above and never
+part of any ensemble version.
+
+**Why opinions live in YAML, not Python.** All match/team adjustments sit in
+`config/human_adjustments_2026.yaml` with a required `reason` and optional
+`confidence` per entry. Views change by editing configuration; the code only
+validates, applies, caps, and reports them, so every subjective claim is
+auditable and diffable.
+
+**How caps and validation prevent uncontrolled manual edits.** Points are
+percentage points on one team's advance probability, bounded three ways:
+`max_single_adjustment_pct` per entry, `max_total_adjustment_pct` per team and
+per match (the net delta is capped again), and `min/max_probability` clipping.
+A fixed category/modifier taxonomy (venue, injuries, tournament_form,
+opponent_quality, style_matchup, expert_override) plus hard errors on unknown
+teams, unknown categories, missing reasons, or non-knockout match numbers keep
+the file from drifting into arbitrary edits.
+
+**How flips propagate.** `goalsignal tournament human-adjust` walks the
+official M73–M104 graph (`OfficialBracket`): each match's adjusted winner
+fills the real `W`/`L` advancement slots of later matches, and each propagated
+pairing is priced with *its own* simulated conditional advance probability
+from the run's matchup CSVs. The CSV also records the parallel **unadjusted
+walk**, so the comparison report attributes downstream pairing changes to
+opinion flips exactly rather than diffing against per-match modal summaries.
+
+**Why nothing else is modified.** The layer is read-only over the simulation
+directory: model probabilities, `config/ensemble.yaml`, the prediction ledger,
+the result store, and all original simulation artifacts stay untouched.
+Outputs are new files (`human_adjusted_bracket.{csv,md}`,
+`human_adjusted_meta.json`) that refuse to overwrite without `--force`.
+
+**Comparison report.** `goalsignal tournament compare-scenarios
+--simulation-dir artifacts/simulations/<run-dir>` compares the model-only
+modal bracket, the knockout-survival modal bracket, and the human-adjusted
+scenario side by side, writing `scenario_comparison.{md,csv}`,
+`scenario_biggest_movers.csv`, and `scenario_flips.csv` into the run
+directory (`--out-dir` to redirect, `--force` to overwrite). Missing scenarios
+are reported as unavailable, never fatal.
+
+**Interpreting the caveats.** Every report states them: human adjustments are
+scenario analysis, not calibrated forecasts; adjusted probabilities rank one
+fixed bracket path; downstream pairings assume earlier scenario picks are
+correct; and the layer is for stress-testing tactical opinions, not for
+claiming improved accuracy.
+
 ## Status: production-grade vs experimental
 
 **Production-grade** (validated, stable, safe to rely on):

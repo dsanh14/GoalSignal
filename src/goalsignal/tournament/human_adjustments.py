@@ -307,6 +307,13 @@ class AdjustedMatch:
     applied: tuple[Adjustment, ...] = ()
     skipped: tuple[Adjustment, ...] = ()
     notes: tuple[str, ...] = ()
+    # The same deterministic walk with no adjustments applied. Recording it
+    # per match lets downstream reports attribute pairing changes to opinion
+    # flips exactly, instead of diffing against per-match modal summaries
+    # (whose chains can disagree with each other independently of any flip).
+    unadjusted_team_1: str = ""
+    unadjusted_team_2: str = ""
+    unadjusted_winner: str = ""
 
     @property
     def adjusted_p_team_2(self) -> float:
@@ -373,6 +380,8 @@ def adjust_bracket(
         )
     winners: dict[int, str] = {}
     losers: dict[int, str] = {}
+    base_winners: dict[int, str] = {}
+    base_losers: dict[int, str] = {}
     results: list[AdjustedMatch] = []
     for number in sorted(bracket_matches):
         slot = bracket_matches[number]
@@ -391,6 +400,28 @@ def adjust_bracket(
             )
             continue
         team_1, team_2 = entrants
+        # Parallel unadjusted walk (same graph, no opinion points) so reports
+        # can attribute downstream pairing changes to flips exactly.
+        base_notes: list[str] = []
+        base_entrants = [
+            _resolve_entrant(
+                symbolic, number, base_winners, base_losers, modal_pair,
+                index, base_notes,
+            )
+            for index, symbolic in enumerate(slot.entrants)
+        ]
+        base_team_1 = base_entrants[0] or ""
+        base_team_2 = base_entrants[1] or ""
+        base_predicted = ""
+        if base_team_1 and base_team_2:
+            base_p_1, _ = baseline_probability(
+                baseline, number, base_team_1, base_team_2
+            )
+            base_predicted = base_team_1 if base_p_1 >= 0.5 else base_team_2
+            base_winners[number] = base_predicted
+            base_losers[number] = (
+                base_team_2 if base_predicted == base_team_1 else base_team_1
+            )
         if modal_pair and set(modal_pair) != {team_1, team_2}:
             notes.append(
                 "propagated pairing differs from the modal simulated matchup "
@@ -459,6 +490,9 @@ def adjust_bracket(
                 applied=tuple(applied),
                 skipped=tuple(skipped),
                 notes=tuple(notes),
+                unadjusted_team_1=base_team_1,
+                unadjusted_team_2=base_team_2,
+                unadjusted_winner=base_predicted,
             )
         )
     return HumanAdjustedBracket(
@@ -474,6 +508,13 @@ def adjust_bracket(
 def bracket_frame(result: HumanAdjustedBracket) -> pd.DataFrame:
     rows = []
     for match in result.matches:
+        reasons = " | ".join(
+            f"{adj.points:+g} {adj.team} [{adj.display_category}]: {adj.reason}"
+            for adj in match.applied
+        )
+        confidences = " | ".join(
+            adj.confidence for adj in match.applied if adj.confidence
+        )
         rows.append({
             "match_number": match.match_number,
             "round": match.round,
@@ -492,6 +533,11 @@ def bracket_frame(result: HumanAdjustedBracket) -> pd.DataFrame:
             "predicted_winner": match.predicted_winner,
             "baseline_winner": match.baseline_winner,
             "winner_changed": match.winner_changed,
+            "adjustment_reasons": reasons,
+            "adjustment_confidences": confidences,
+            "unadjusted_team_1": match.unadjusted_team_1,
+            "unadjusted_team_2": match.unadjusted_team_2,
+            "unadjusted_winner": match.unadjusted_winner,
             "notes": " | ".join(match.notes),
         })
     return pd.DataFrame(rows)

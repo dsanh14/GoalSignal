@@ -17,6 +17,11 @@ Everything is optimized and evaluated for **outcome probability quality** — lo
 loss, Brier score, and calibration — with accuracy reported only as a secondary
 metric.
 
+**New to the project?** Start with the
+[5-minute demo walkthrough](docs/demo_walkthrough.md) — it runs the pipeline,
+applies the human opinion overlay, and reproduces the "Mexico upset" scenario
+end to end, with real example output.
+
 ## Why not exact scores?
 
 Exact-score prediction is a harder problem than the question we actually care
@@ -307,6 +312,47 @@ uv run goalsignal tournament bracket
 
 Both sources output round-of-32 / round-of-16 / quarterfinal / semifinal /
 final / champion probabilities for every team.
+
+## Human-adjusted scenario analysis
+
+A **scenario analysis layer** for stress-testing tactical opinions on top of an
+existing simulation — an **opinion overlay**, not a calibrated forecast.
+
+- **Opinions live in YAML, not Python**
+  ([config/human_adjustments_2026.yaml](config/human_adjustments_2026.yaml)):
+  per-match, per-team percentage-point adjustments with a required `reason`
+  and optional `confidence`, so views can change without touching code and
+  every claim is auditable.
+- **Caps and strict validation prevent uncontrolled edits**: per-adjustment
+  and per-match point caps, probability clipping, a fixed category/modifier
+  taxonomy, and hard errors on unknown teams, missing reasons, or
+  out-of-range points.
+- **Flips propagate through the official bracket graph**: each match's
+  adjusted winner feeds the real M73–M104 advancement slots, so one flipped
+  pick visibly reshapes the downstream pairings (and the report traces
+  exactly which ones, against a recorded no-opinion walk).
+- **Nothing else changes**: the layer is read-only over the simulation
+  directory — model probabilities, the prediction ledger, and all original
+  simulation artifacts are untouched; outputs are new files.
+
+```bash
+# Apply the opinion overlay to an existing run (writes
+# human_adjusted_bracket.{csv,md} + meta into the simulation dir):
+uv run goalsignal tournament human-adjust \
+    --simulation-dir artifacts/simulations/<run-dir> \
+    --config config/human_adjustments_2026.yaml
+
+# Compare model-only vs knockout-survival vs the human-adjusted scenario
+# (writes scenario_comparison.{md,csv}, scenario_biggest_movers.csv,
+# scenario_flips.csv; missing scenarios are reported, not fatal):
+uv run goalsignal tournament compare-scenarios \
+    --simulation-dir artifacts/simulations/<run-dir>
+```
+
+**Interpreting the caveats.** Adjusted probabilities rank one fixed bracket
+path under stated opinions; they are scenario analysis, not calibrated
+forecasts, and no accuracy improvement is claimed. Use the reports to make
+assumptions explicit and inspect their downstream consequences.
 
 ## How to add manual data files
 
