@@ -1,0 +1,11 @@
+match_id,team_a,team_b,source_model,team_a_win_prob,draw_prob,team_b_win_prob,team_a_advance_prob,team_b_advance_prob,confidence,reasoning
+,Mexico,England,style-web-layer,,,,0.58,0.42,0.85,"Mexico City altitude, crowd, and England slow-start pattern give Mexico a real advance edge."
+,Canada,Morocco,style-web-layer,,,,0.42,0.58,0.70,"Morocco's low block and penalty-survival profile fit well against Canada's energy."
+,United States,Belgium,style-web-layer,,,,0.41,0.59,0.70,"Belgium's comeback showed resilience; USA home edge keeps it close but Belgium have more attacking solutions."
+,Portugal,Spain,style-web-layer,,,,0.49,0.51,0.65,"Spain's Austria performance raises their floor, but Portugal's transition threat still makes this near-even."
+,Argentina,Colombia,style-web-layer,,,,0.56,0.44,0.65,"Argentina remain stronger, but Colombia's physical/battle-tested path narrows the gap."
+,France,Spain,style-web-layer,,,,0.53,0.47,0.70,"France's athletic transition threat is a strong counter to Spain's possession control."
+,Brazil,Mexico,style-web-layer,,,,0.58,0.42,0.65,"Mexico's momentum and crowd travel, but Brazil's individual quality and adjustment ability remain the edge."
+,France,Morocco,style-web-layer,,,,0.70,0.30,0.75,"Morocco's low block lowers event rate, but France have too many transition and individual solutions."
+,Brazil,Argentina,style-web-layer,,,,0.46,0.54,0.60,"Argentina's knockout control narrowly outweighs Brazil's attacking talent."
+,Spain,Argentina,style-web-layer,,,,0.50,0.50,0.55,"Spain's form and press make this close; Argentina retain elite game-management."

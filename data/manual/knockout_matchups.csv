@@ -1,0 +1,16 @@
+match_id,stage,team_a,team_b,historical_team_a_advances,historical_team_b_advances
+M89,knockout,Paraguay,France,0.22,0.78
+M90,knockout,Canada,Morocco,0.42,0.58
+M91,knockout,Brazil,Norway,0.69,0.31
+M92,knockout,Mexico,England,0.43,0.57
+M93,knockout,Portugal,Spain,0.47,0.53
+M94,knockout,United States,Belgium,0.41,0.59
+M95,knockout,Argentina,Australia,0.81,0.19
+M96,knockout,Switzerland,Colombia,0.37,0.63
+M97,knockout,France,Morocco,0.70,0.30
+M98,knockout,Spain,Belgium,0.72,0.28
+M99,knockout,Brazil,Mexico,0.59,0.41
+M100,knockout,Argentina,Colombia,0.58,0.42
+M101,knockout,France,Spain,0.51,0.49
+M102,knockout,Brazil,Argentina,0.46,0.54
+M104,knockout,Spain,Argentina,0.50,0.50

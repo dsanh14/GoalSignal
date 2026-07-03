@@ -1,0 +1,11 @@
+match_id,team_a,team_b,stage,host_boost,crowd_advantage,travel_km_a,travel_km_b,rest_days_a,rest_days_b,heat_disadvantage_a,timezone_shift_a,timezone_shift_b
+pair::Mexico|England,Mexico,England,knockout,45,25,300,2600,5,5,0,0,2
+pair::Canada|Morocco,Canada,Morocco,knockout,0,-5,2500,7600,5,5,0,1,6
+pair::United States|Belgium,United States,Belgium,knockout,35,25,900,7800,5,5,0,0,6
+pair::Portugal|Spain,Portugal,Spain,knockout,0,0,7200,7300,4,5,0,5,5
+pair::France|Morocco,France,Morocco,knockout,0,-3,6200,6000,5,5,0,5,5
+pair::Brazil|Mexico,Brazil,Mexico,knockout,0,-12,6400,2900,5,6,0,4,1
+pair::Argentina|Colombia,Argentina,Colombia,knockout,0,-6,8400,3900,5,5,0,5,2
+pair::France|Spain,France,Spain,knockout,0,0,6900,7800,5,5,0,5,5
+pair::Brazil|Argentina,Brazil,Argentina,knockout,0,0,5400,8400,5,5,0,4,5
+pair::Spain|Argentina,Spain,Argentina,knockout,0,0,6000,8500,5,5,0,5,5

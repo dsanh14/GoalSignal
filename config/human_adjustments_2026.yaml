@@ -33,6 +33,22 @@ global:
   max_probability: 0.95
 
 matches:
+  90:
+    label: "Canada vs Morocco"
+    adjustments:
+      - team: Morocco
+        category: style_matchup
+        modifier: low_block_vs_possession_boost
+        points: 5
+        confidence: medium
+        reason: "Morocco's compact low block and penalty-survival style fit well against Canada's pressing energy."
+      - team: Canada
+        category: tournament_form
+        modifier: dominant_win_boost
+        points: 2
+        confidence: low
+        reason: "Canada already advanced from the R32 and carry belief, but the style matchup is awkward."
+
   92:
     label: "Mexico vs England"
     adjustments:
@@ -67,9 +83,53 @@ matches:
       - team: Spain
         category: injuries
         modifier: attack_downgrade
-        points: -6
+        points: -3
+        confidence: low
+        reason: "Spain winger/directness questions still matter, but the 3-0 Austria performance lowers the concern."
+      - team: Spain
+        category: tournament_form
+        modifier: dominant_win_boost
+        points: 4
+        confidence: high
+        reason: "Spain's 3-0 Austria win showed chance creation, pressing, and defensive control."
+
+  94:
+    label: "United States vs Belgium"
+    adjustments:
+      - team: United States
+        category: venue
+        modifier: home_host_boost
+        points: 5
         confidence: medium
-        reason: "Spain winger injuries reduce direct chance creation."
+        reason: "USA retain a home-crowd and familiarity edge."
+      - team: Belgium
+        category: tournament_form
+        modifier: late_comeback_boost
+        points: 5
+        confidence: medium
+        reason: "Belgium's comeback from 2-0 down against Senegal showed late-game resilience."
+      - team: Belgium
+        category: tournament_form
+        modifier: late_collapse_penalty
+        points: -3
+        confidence: medium
+        reason: "Belgium also showed defensive risk by falling 2-0 behind Senegal."
+
+  97:
+    label: "France vs Morocco"
+    adjustments:
+      - team: Morocco
+        category: style_matchup
+        modifier: low_block_vs_possession_boost
+        points: 3
+        confidence: medium
+        reason: "Morocco's low block can lower event rate and create penalty danger."
+      - team: France
+        category: tournament_form
+        modifier: dominant_win_boost
+        points: 6
+        confidence: high
+        reason: "France have been the most explosive and battle-tested team in the current bracket."
 
   100:
     label: "Argentina vs Colombia"
@@ -85,3 +145,25 @@ matches:
         points: -4
         confidence: low
         reason: "Argentina not seriously challenged before QF."
+      - team: Colombia
+        category: style_matchup
+        modifier: transition_threat_boost
+        points: 3
+        confidence: medium
+        reason: "Colombia's physicality and vertical transitions are a real test for Argentina's first elite opponent."
+
+  101:
+    label: "France vs Spain"
+    adjustments:
+      - team: France
+        category: style_matchup
+        modifier: transition_threat_boost
+        points: 5
+        confidence: medium
+        reason: "France's athletic transition threat is a strong counter to Spain's possession control."
+      - team: Spain
+        category: tournament_form
+        modifier: dominant_win_boost
+        points: 4
+        confidence: high
+        reason: "Spain's Austria performance showed the possession can create high-quality chances."
