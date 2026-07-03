@@ -778,6 +778,30 @@ def tournament_human_adjust(
         Path,
         typer.Option("--config", help="Human adjustments YAML."),
     ] = Path("config/human_adjustments_2026.yaml"),
+    results: Annotated[
+        Path | None,
+        typer.Option(
+            "--results",
+            help="Confirmed knockout results CSV overlay. Defaults to "
+            "data/manual/knockout_results_2026.csv when present.",
+        ),
+    ] = None,
+    ignore_results: Annotated[
+        bool,
+        typer.Option(
+            "--ignore-results",
+            help="Skip the confirmed-results overlay even if the default file exists.",
+        ),
+    ] = False,
+    tags: Annotated[
+        Path | None,
+        typer.Option(
+            "--tags",
+            help="Knockout performance tags CSV (opt-in bounded nudges). "
+            "Do not combine with a YAML regenerated from the same tags by "
+            "update-human-context — the evidence would count twice.",
+        ),
+    ] = None,
     force: Annotated[
         bool,
         typer.Option("--force", help="Overwrite existing human-adjusted artifacts."),
@@ -786,8 +810,10 @@ def tournament_human_adjust(
     """Apply the winner-only human adjustment layer to an existing simulation.
 
     Reads matchup probabilities from the simulation directory (never re-runs
-    the simulator), applies the YAML-configured modifiers, fixes one predicted
-    winner per knockout match, and writes human_adjusted_bracket.{csv,md}.
+    the simulator), overlays confirmed knockout results (real winners
+    propagate through the bracket), applies the YAML-configured modifiers and
+    optional performance-tag nudges, fixes one predicted winner per knockout
+    match, and writes human_adjusted_bracket.{csv,md}.
     """
     from goalsignal.tournament.bracket_2026 import OfficialBracket
     from goalsignal.tournament.human_adjustments import (
@@ -796,6 +822,12 @@ def tournament_human_adjust(
         load_simulation_baseline,
         write_human_adjusted,
     )
+    from goalsignal.tournament.knockout_results import (
+        DEFAULT_RESULTS_PATH,
+        load_knockout_results,
+    )
+    from goalsignal.tournament.performance_tags import load_performance_tags
+    from goalsignal.utils.paths import resolve as resolve_path
 
     if simulation_dir is None:
         sim_path = _latest_tournament_dir()
@@ -805,19 +837,40 @@ def tournament_human_adjust(
         sim_path = _latest_tournament_dir(str(simulation_dir))
     try:
         adjustments = HumanAdjustmentsConfig.load(config)
+        confirmed = {}
+        if not ignore_results:
+            if results is not None:
+                confirmed = load_knockout_results(results, require=True)
+            elif resolve_path(DEFAULT_RESULTS_PATH).exists():
+                confirmed = load_knockout_results(DEFAULT_RESULTS_PATH)
+        tag_list = load_performance_tags(tags, require=True) if tags else []
         baseline = load_simulation_baseline(sim_path)
         bracket = OfficialBracket.load()
-        result = adjust_bracket(baseline, adjustments, bracket.matches)
+        result = adjust_bracket(
+            baseline,
+            adjustments,
+            bracket.matches,
+            confirmed_results=confirmed,
+            tags=tag_list,
+        )
         paths = write_human_adjusted(result, force=force)
     except (ValueError, FileNotFoundError, FileExistsError) as error:
         typer.echo(f"human-adjust failed: {error}", err=True)
         raise typer.Exit(code=1) from error
     adjusted = [m for m in result.matches if m.applied]
     typer.echo(f"Simulation: {sim_path}")
+    n_confirmed = sum(1 for m in result.matches if m.confirmed_result)
     typer.echo(
-        f"Knockout matches: {len(result.matches)}; adjusted: {len(adjusted)}; "
+        f"Knockout matches: {len(result.matches)}; confirmed: {n_confirmed}; "
+        f"adjusted: {len(adjusted)}; "
         f"winners changed: {sum(1 for m in result.matches if m.winner_changed)}"
     )
+    for match in result.matches:
+        if match.confirmed_result:
+            typer.echo(
+                f"M{match.match_number}: {match.team_1} vs {match.team_2} | "
+                f"CONFIRMED {match.predicted_winner} ({match.decided_by})"
+            )
     for match in adjusted:
         flip = " (FLIPPED)" if match.winner_changed else ""
         typer.echo(
@@ -831,6 +884,71 @@ def tournament_human_adjust(
         typer.echo(f"Predicted champion: {result.champion}")
     for kind, path in paths.items():
         typer.echo(f"{kind}: {path}")
+
+
+@tournament_app.command("update-human-context")
+def tournament_update_human_context(
+    results: Annotated[
+        Path,
+        typer.Option("--results", help="Confirmed knockout results CSV."),
+    ] = Path("data/manual/knockout_results_2026.csv"),
+    tags: Annotated[
+        Path,
+        typer.Option("--tags", help="Knockout performance tags CSV."),
+    ] = Path("data/manual/knockout_performance_tags.csv"),
+    matchups: Annotated[
+        Path,
+        typer.Option(
+            "--matchups",
+            help="Knockout matchup baseline CSV (advance probabilities).",
+        ),
+    ] = Path("data/manual/knockout_matchups.csv"),
+    recent_form: Annotated[
+        Path,
+        typer.Option("--recent-form", help="Recent form CSV to update."),
+    ] = Path("data/manual/recent_form.csv"),
+    expert: Annotated[
+        Path,
+        typer.Option("--expert", help="Expert predictions CSV to update."),
+    ] = Path("data/manual/expert_predictions.csv"),
+    adjustments: Annotated[
+        Path,
+        typer.Option("--adjustments", help="Human adjustments YAML to update."),
+    ] = Path("config/human_adjustments_2026.yaml"),
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="Overwrite existing target files."),
+    ] = False,
+) -> None:
+    """Regenerate human-context inputs from confirmed results + performance tags.
+
+    Resolves the real (or provisional) R16 pairings through the official
+    bracket, then updates recent_form.csv (bounded deltas over a preserved
+    base snapshot, with an audit file), expert_predictions.csv (one advance
+    row per R16 matchup under source_model 'knockout-context-2026'), and the
+    human adjustments YAML (R16 blocks regenerated; other matches preserved).
+    Every adjustment carries its reason. Refuses to overwrite without --force.
+    """
+    from goalsignal.tournament.human_context import update_human_context
+
+    try:
+        update = update_human_context(
+            results_path=results,
+            tags_path=tags,
+            matchups_path=matchups,
+            recent_form_path=recent_form,
+            expert_path=expert,
+            adjustments_path=adjustments,
+            force=force,
+        )
+    except (ValueError, FileNotFoundError, FileExistsError) as error:
+        typer.echo(f"update-human-context failed: {error}", err=True)
+        raise typer.Exit(code=1) from error
+    typer.echo("Human-context update summary:")
+    for line in update.changes:
+        typer.echo(f"  - {line}")
+    for warning in update.warnings:
+        typer.echo(f"WARNING: {warning}", err=True)
 
 
 @tournament_app.command("compare-scenarios")

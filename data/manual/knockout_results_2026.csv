@@ -1,0 +1,13 @@
+match_number,round,team_a,team_b,score_a,score_b,aet,penalties,winner,notes
+73,round_of_32,South Africa,Canada,0,1,false,false,Canada,
+74,round_of_32,Germany,Paraguay,1,1,true,true,Paraguay,"Paraguay won on penalties"
+75,round_of_32,Netherlands,Morocco,1,1,true,true,Morocco,"Morocco won on penalties"
+77,round_of_32,France,Sweden,3,0,false,false,France,"Dominant France win"
+79,round_of_32,Mexico,Ecuador,,,false,false,Mexico,"Winner confirmed; Mexico handled Ecuador cleanly (full-time score not recorded here)"
+80,round_of_32,England,DR Congo,,,false,false,England,"Winner confirmed; England trailed until ~75' before a late comeback (full-time score not recorded here)"
+81,round_of_32,United States,Bosnia and Herzegovina,2,0,false,false,United States,"Clean 2-0 win"
+82,round_of_32,Belgium,Senegal,,,false,false,Belgium,"Winner confirmed; Belgium came from 0-2 down (full-time score not recorded here)"
+83,round_of_32,Portugal,Croatia,2,1,false,false,Portugal,"Portugal comeback; Ronaldo penalty and Gonçalo Ramos 90+4"
+84,round_of_32,Spain,Austria,3,0,false,false,Spain,"Dominant Spain win"
+85,round_of_32,Switzerland,Algeria,2,0,false,false,Switzerland,"Clean 2-0 win"
+88,round_of_32,Australia,Egypt,1,1,true,true,Egypt,"Egypt won penalties 4-2"

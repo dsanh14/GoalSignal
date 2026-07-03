@@ -18,6 +18,8 @@ from goalsignal.tournament.human_adjustments import (
     render_markdown,
     write_human_adjusted,
 )
+from goalsignal.tournament.knockout_results import KnockoutResult
+from goalsignal.tournament.performance_tags import PerformanceTag
 
 # --------------------------------------------------------------------------- #
 # Synthetic fixtures (fictional teams only).
@@ -314,6 +316,282 @@ def test_neutral_fallback_pairing_is_flagged(tmp_path):
     assert any("never observed" in note for note in final.notes)
     # Deterministic tie-break: slot-1 team advances.
     assert final.predicted_winner == final.team_1
+
+
+# --------------------------------------------------------------------------- #
+# Confirmed results overlay.
+# --------------------------------------------------------------------------- #
+
+
+def _result(number, round_name, team_a, team_b, winner, *, aet=False,
+            penalties=False, score_a=None, score_b=None, notes=""):
+    return KnockoutResult(
+        match_number=number, round=round_name, team_a=team_a, team_b=team_b,
+        score_a=score_a, score_b=score_b, aet=aet, penalties=penalties,
+        winner=winner, notes=notes,
+    )
+
+
+def test_confirmed_winner_overrides_modal_predicted_winner(tmp_path):
+    """M101's modal winner is Astoria (p=0.55); the confirmed result says
+    Borduria won, so Borduria must advance in both walks."""
+    sim = _write_sim(tmp_path)
+    config = HumanAdjustmentsConfig.load(_write_config(tmp_path, {}))
+    confirmed = {
+        101: _result(101, "semifinal", "Astoria", "Borduria", "Borduria",
+                     score_a=0, score_b=1),
+    }
+    result = adjust_bracket(
+        load_simulation_baseline(sim), config, _bracket_matches(),
+        confirmed_results=confirmed,
+    )
+    by_number = {m.match_number: m for m in result.matches}
+    semi = by_number[101]
+    assert semi.confirmed_result
+    assert semi.decided_by == "regulation"
+    assert semi.baseline_source == "confirmed_result"
+    assert semi.predicted_winner == "Borduria"
+    assert semi.adjusted_p_team_1 == 0.0  # Astoria (slot 1) lost
+    # A fact is not an opinion flip.
+    assert not semi.winner_changed
+    assert semi.unadjusted_winner == "Borduria"
+    assert any("modal simulated winner" in note for note in semi.notes)
+    # The final now pairs Borduria with the other semifinal winner.
+    final = by_number[104]
+    assert {final.team_1, final.team_2} == {"Borduria", "Cascadia"}
+    assert {final.unadjusted_team_1, final.unadjusted_team_2} == (
+        {"Borduria", "Cascadia"}
+    )
+
+
+def test_penalty_win_propagates_confirmed_winner(tmp_path):
+    """A shootout result (level after ET) propagates the shootout winner."""
+    sim = _write_sim(tmp_path)
+    config = HumanAdjustmentsConfig.load(_write_config(tmp_path, {}))
+    confirmed = {
+        102: _result(102, "semifinal", "Cascadia", "Drachenland", "Drachenland",
+                     aet=True, penalties=True, score_a=1, score_b=1,
+                     notes="Drachenland won 4-2 on penalties"),
+    }
+    result = adjust_bracket(
+        load_simulation_baseline(sim), config, _bracket_matches(),
+        confirmed_results=confirmed,
+    )
+    by_number = {m.match_number: m for m in result.matches}
+    semi = by_number[102]
+    assert semi.confirmed_result
+    assert semi.decided_by == "penalties"
+    assert semi.predicted_winner == "Drachenland"
+    assert any("penalties" in note for note in semi.notes)
+    # Drachenland (not the modal Cascadia) feeds the final.
+    final = by_number[104]
+    assert "Drachenland" in (final.team_1, final.team_2)
+    assert result.champion in {"Astoria", "Drachenland"}
+
+
+def test_downstream_pairings_update_after_confirmed_results(tmp_path):
+    """Both semifinals confirmed against the modal picks re-pair the final —
+    the synthetic analog of R16 pairings updating after confirmed R32 results."""
+    sim = _write_sim(tmp_path)
+    config = HumanAdjustmentsConfig.load(_write_config(tmp_path, {}))
+    confirmed = {
+        101: _result(101, "semifinal", "Astoria", "Borduria", "Borduria",
+                     aet=True, penalties=True, score_a=1, score_b=1),
+        102: _result(102, "semifinal", "Cascadia", "Drachenland", "Drachenland",
+                     aet=True, penalties=True, score_a=0, score_b=0),
+    }
+    result = adjust_bracket(
+        load_simulation_baseline(sim), config, _bracket_matches(),
+        confirmed_results=confirmed,
+    )
+    final = {m.match_number: m for m in result.matches}[104]
+    # Modal final was Astoria vs Cascadia; confirmed winners replace both.
+    assert {final.team_1, final.team_2} == {"Borduria", "Drachenland"}
+    assert not final.confirmed_result  # the final itself is still predicted
+    assert final.baseline_source == "neutral_fallback"
+
+
+def test_confirmed_pairing_overrides_propagated_pairing(tmp_path):
+    """A confirmed pairing that contradicts the modal entrants wins."""
+    sim = _write_sim(tmp_path)
+    config = HumanAdjustmentsConfig.load(_write_config(tmp_path, {}))
+    confirmed = {
+        101: _result(101, "semifinal", "Astoria", "Drachenland", "Drachenland",
+                     score_a=0, score_b=2),
+    }
+    result = adjust_bracket(
+        load_simulation_baseline(sim), config, _bracket_matches(),
+        confirmed_results=confirmed,
+    )
+    semi = {m.match_number: m for m in result.matches}[101]
+    assert (semi.team_1, semi.team_2) == ("Astoria", "Drachenland")
+    assert any("modal simulated matchup" in n for n in semi.notes)
+
+
+def test_confirmed_match_ignores_configured_adjustments(tmp_path):
+    sim = _write_sim(tmp_path)
+    config = HumanAdjustmentsConfig.load(_write_config(tmp_path, {
+        101: {"adjustments": [_adjustment("Astoria", 9)]},
+    }))
+    confirmed = {
+        101: _result(101, "semifinal", "Astoria", "Borduria", "Borduria",
+                     score_a=0, score_b=1),
+    }
+    result = adjust_bracket(
+        load_simulation_baseline(sim), config, _bracket_matches(),
+        confirmed_results=confirmed,
+    )
+    semi = {m.match_number: m for m in result.matches}[101]
+    assert semi.applied == ()
+    assert len(semi.skipped) == 1
+    assert semi.predicted_winner == "Borduria"
+    assert any("already confirmed" in w for w in result.warnings)
+
+
+def test_confirmed_overlay_validation(tmp_path):
+    sim = _write_sim(tmp_path)
+    baseline = load_simulation_baseline(sim)
+    config = HumanAdjustmentsConfig.load(_write_config(tmp_path, {}))
+    wrong_round = {101: _result(101, "final", "Astoria", "Borduria", "Borduria")}
+    with pytest.raises(ValueError, match="round"):
+        adjust_bracket(baseline, config, _bracket_matches(),
+                       confirmed_results=wrong_round)
+    unknown_team = {
+        101: _result(101, "semifinal", "Astoria", "Atlantis", "Atlantis"),
+    }
+    with pytest.raises(ValueError, match="Atlantis"):
+        adjust_bracket(baseline, config, _bracket_matches(),
+                       confirmed_results=unknown_team)
+
+
+# --------------------------------------------------------------------------- #
+# Performance-tag nudges.
+# --------------------------------------------------------------------------- #
+
+
+def _tag(team, number, tag, points, reason="synthetic tag reason"):
+    return PerformanceTag(
+        team=team, match_number=number, tag=tag, points=points, reason=reason
+    )
+
+
+def test_tags_create_bounded_adjustments(tmp_path):
+    """Late-comeback and fatigue tags earned earlier nudge later matches,
+    with the net capped at the tag-nudge cap."""
+    sim = _write_sim(tmp_path)
+    config = HumanAdjustmentsConfig.load(_write_config(tmp_path, {}))
+    tags = [
+        _tag("Cascadia", 101, "late_comeback", 4),
+        _tag("Cascadia", 101, "extra_time_fatigue", -2),
+        _tag("Drachenland", 101, "extra_time_fatigue", -2),
+    ]
+    result = adjust_bracket(
+        load_simulation_baseline(sim), config, _bracket_matches(), tags=tags
+    )
+    match = {m.match_number: m for m in result.matches}[102]
+    assert match.tag_points_team_1 == pytest.approx(2.0)   # +4 - 2
+    assert match.tag_points_team_2 == pytest.approx(-2.0)
+    # 0.70 + (2 - (-2))/100 = 0.74
+    assert match.adjusted_p_team_1 == pytest.approx(0.74)
+    assert "late_comeback" in match.tag_reasons
+    assert "synthetic tag reason" in match.tag_reasons
+
+    # A stack of tags beyond the cap is clamped to ±6 by default.
+    heavy = [
+        _tag("Cascadia", 101, "dominant_win", 5),
+        _tag("Cascadia", 101, "late_comeback", 5),
+        _tag("Cascadia", 101, "battle_tested", 5),
+    ]
+    capped = adjust_bracket(
+        load_simulation_baseline(sim), config, _bracket_matches(), tags=heavy
+    )
+    match = {m.match_number: m for m in capped.matches}[102]
+    assert match.tag_points_team_1 == pytest.approx(6.0)
+    assert match.adjusted_p_team_1 == pytest.approx(0.76)
+    assert any("capped" in note for note in match.notes)
+
+
+def test_tags_do_not_apply_to_earlier_or_confirmed_matches(tmp_path):
+    sim = _write_sim(tmp_path)
+    config = HumanAdjustmentsConfig.load(_write_config(tmp_path, {}))
+    tags = [_tag("Astoria", 102, "dominant_win", 5)]
+    confirmed = {
+        101: _result(101, "semifinal", "Astoria", "Borduria", "Astoria",
+                     score_a=2, score_b=0),
+    }
+    result = adjust_bracket(
+        load_simulation_baseline(sim), config, _bracket_matches(),
+        confirmed_results=confirmed, tags=tags,
+    )
+    by_number = {m.match_number: m for m in result.matches}
+    # M101 is confirmed: no tag nudge is recorded or applied.
+    assert by_number[101].tag_points_team_1 == 0.0
+    assert by_number[101].adjusted_p_team_1 == 1.0
+    # M102: Astoria is not playing, so nothing changes there either.
+    assert by_number[102].tag_points_team_1 == 0.0
+    # M104 (Astoria vs Cascadia): the M102-earned tag applies (102 < 104).
+    final = by_number[104]
+    assert final.tag_points_team_1 == pytest.approx(5.0)
+    assert final.adjusted_p_team_1 == pytest.approx(0.65)
+
+
+def test_tags_and_config_points_combine_under_total_cap(tmp_path):
+    sim = _write_sim(tmp_path)
+    config = HumanAdjustmentsConfig.load(_write_config(tmp_path, {
+        102: {"adjustments": [_adjustment("Cascadia", 10)]},
+    }))
+    tags = [
+        _tag("Cascadia", 101, "dominant_win", 5),
+        _tag("Cascadia", 101, "battle_tested", 5),
+    ]
+    result = adjust_bracket(
+        load_simulation_baseline(sim), config, _bracket_matches(), tags=tags
+    )
+    match = {m.match_number: m for m in result.matches}[102]
+    # Config +10, tag nudge capped at +6 -> combined capped at 15 total.
+    assert match.net_points_team_1 == 10
+    assert match.tag_points_team_1 == 6
+    assert match.applied_delta_pct == pytest.approx(15.0)
+    assert match.adjusted_p_team_1 == pytest.approx(0.85)
+
+
+def test_unknown_tag_teams_warn_but_do_not_fail(tmp_path):
+    sim = _write_sim(tmp_path)
+    config = HumanAdjustmentsConfig.load(_write_config(tmp_path, {}))
+    result = adjust_bracket(
+        load_simulation_baseline(sim), config, _bracket_matches(),
+        tags=[_tag("Atlantis", 101, "dominant_win", 5)],
+    )
+    assert any("Atlantis" in w for w in result.warnings)
+    assert all(m.tag_points_team_1 == 0 for m in result.matches)
+
+
+def test_artifacts_include_overlay_columns(tmp_path):
+    sim = _write_sim(tmp_path)
+    config = HumanAdjustmentsConfig.load(_write_config(tmp_path, {}))
+    confirmed = {
+        101: _result(101, "semifinal", "Astoria", "Borduria", "Borduria",
+                     aet=True, penalties=True, score_a=1, score_b=1,
+                     notes="won on penalties"),
+    }
+    tags = [_tag("Drachenland", 101, "extra_time_fatigue", -3)]
+    result = adjust_bracket(
+        load_simulation_baseline(sim), config, _bracket_matches(),
+        confirmed_results=confirmed, tags=tags,
+    )
+    paths = write_human_adjusted(result, out_dir=tmp_path / "out")
+    frame = pd.read_csv(paths["csv"])
+    assert {"confirmed_result", "decided_by", "tag_points_team_1",
+            "tag_points_team_2", "tag_reasons"} <= set(frame.columns)
+    confirmed_row = frame[frame["match_number"] == 101].iloc[0]
+    assert bool(confirmed_row["confirmed_result"])
+    assert confirmed_row["decided_by"] == "penalties"
+    md = paths["md"].read_text(encoding="utf-8")
+    assert "Confirmed results (overlay)" in md
+    assert "Performance-tag nudges (bounded)" in md
+    meta = json.loads(paths["meta"].read_text(encoding="utf-8"))
+    assert meta["n_confirmed_results"] == 1
+    assert meta["n_matches_tag_nudged"] == 1
 
 
 # --------------------------------------------------------------------------- #

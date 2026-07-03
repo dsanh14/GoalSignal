@@ -577,6 +577,66 @@ existing command.
   with a real `scenario_comparison.md` excerpt and a "How to reproduce the
   Mexico upset scenario" section; linked from the top of `README.md`.
 
+#### Live knockout context overlay (2026-07-03, opt-in manual layers)
+
+- **Confirmed results overlay** (`tournament/knockout_results.py`,
+  `data/manual/knockout_results_2026.csv`): hand-entered confirmed knockout
+  results (schema `match_number,round,team_a,team_b,score_a,score_b,aet,
+  penalties,winner,notes`; scores include ET / exclude shootouts per rule 4;
+  blank scores = winner-only row; strict validation incl. winner-vs-score
+  consistency and official round). `tournament human-adjust` loads it by
+  default when present (`--results`/`--ignore-results`): confirmed pairings
+  and winners **override modal simulated picks in both walks**, propagate
+  through the M73-M104 graph (e.g. penalty winners Paraguay/Morocco/Egypt
+  replace modal Germany/Netherlands/Australia in R16), never count as opinion
+  flips (`winner_changed=false`, `baseline_source=confirmed_result`, new CSV
+  columns `confirmed_result`/`decided_by` — additive, older readers fine).
+- **Performance tags** (`tournament/performance_tags.py`,
+  `data/manual/knockout_performance_tags.csv`, schema
+  `team,match_number,tag,points,reason`): 14-tag vocabulary (dominant_win,
+  penalty_win, extra_time_fatigue, late_comeback, late_collapse_warning,
+  blew_lead, survived_pressure, low_block_success, altitude_edge, not_tested,
+  battle_tested, narrow_win, finishing_boost, defensive_warning) with
+  expected-sign + |points|≤10 validation and a fixed mapping into the
+  existing adjustment taxonomy. A tag earned in match N nudges only matches
+  > N; per-team net capped at ±6 (`tag_nudge`), then subject to the existing
+  total caps/clipping. Opt-in in `human-adjust` via `--tags` (columns
+  `tag_points_team_1/2`, `tag_reasons`) — do NOT combine with a YAML
+  regenerated from the same tags (double count).
+- **`tournament update-human-context`** (`tournament/human_context.py`):
+  resolves real/provisional R16 pairings from confirmed R32 winners through
+  the official graph, then regenerates (refusing without `--force`,
+  idempotent): R16 blocks of `config/human_adjustments_2026.yaml` (other
+  matches preserved; merged YAML validated through the strict loader before
+  writing; hand-written comments are replaced by a managed header),
+  `expert_predictions.csv` R16 rows under source_model
+  `knockout-context-2026` (matchup baseline ± bounded shift, reasons
+  embedded), and `recent_form.csv` (deltas capped ±6 pct pts over a
+  preserved `recent_form_base.csv` snapshot; audit in
+  `recent_form_context_audit.csv`; teams without a base row skipped, never
+  invented). Priority R16 opinions live in `R16_PRIORITY` (editable
+  declarative table incl. Mexico altitude +7, USA home +3, Portugal
+  transition +4, Argentina/Colombia provisional fallbacks).
+- **Verified real run** on `b1bfd6e3fb69c758.ensemble-knockout_survival.
+  ko-upset`: 12 confirmed R32 results propagate the live R16 bracket
+  (M89 Paraguay-France … M95 Argentina-Egypt, M96 Switzerland-Colombia;
+  M76/78/86/87 honestly unconfirmed, M91 skipped); expert leanings M89 0.18,
+  M90 0.39, M92 0.54, M93 0.50, M94 0.46, M95 0.67 (confidence 0.55),
+  M96 0.34; walk flips exactly M92 England→Mexico (0.392→0.502) with 3
+  attributable downstream changes; champion Argentina; compare-scenarios
+  reads the new columns cleanly.
+- **Tests:** `test_knockout_results.py` (13), `test_performance_tags.py` (14),
+  `test_human_context.py` (11), `test_human_adjustments.py` +10 (confirmed
+  overrides modal, penalty propagation, downstream re-pairing, bounded tag
+  nudges). Suite **389 passed** + ruff clean; 2 failures pre-existing on this
+  branch (header-only `market_odds.csv` breaks `test_keying.py::test_existing_
+  match_id_only_files_still_work` and `test_signals_pipeline.py::test_cli_
+  signals_blend_all_versions_run[market_only]` — verified present with all
+  new changes stashed).
+- **Honesty:** overlays are facts (results) + bounded opinions (tags/priors);
+  no fitted coefficients, no accuracy claim, ledger/result store/`Datasets/`
+  untouched, base model unchanged.
+
 ## Conventions
 
 - Python 3.12, uv-managed. Ruff (line length 100); pytest; all tests must pass

@@ -1,11 +1,18 @@
 match_id,team_a,team_b,source_model,team_a_win_prob,draw_prob,team_b_win_prob,team_a_advance_prob,team_b_advance_prob,confidence,reasoning
 ,Mexico,England,style-web-layer,,,,0.58,0.42,0.85,"Mexico City altitude, crowd, and England slow-start pattern give Mexico a real advance edge."
-,Canada,Morocco,style-web-layer,,,,0.42,0.58,0.70,"Morocco's low block and penalty-survival profile fit well against Canada's energy."
-,United States,Belgium,style-web-layer,,,,0.41,0.59,0.70,"Belgium's comeback showed resilience; USA home edge keeps it close but Belgium have more attacking solutions."
+,Canada,Morocco,style-web-layer,,,,0.42,0.58,0.70,Morocco's low block and penalty-survival profile fit well against Canada's energy.
+,United States,Belgium,style-web-layer,,,,0.41,0.59,0.70,Belgium's comeback showed resilience; USA home edge keeps it close but Belgium have more attacking solutions.
 ,Portugal,Spain,style-web-layer,,,,0.49,0.51,0.65,"Spain's Austria performance raises their floor, but Portugal's transition threat still makes this near-even."
 ,Argentina,Colombia,style-web-layer,,,,0.56,0.44,0.65,"Argentina remain stronger, but Colombia's physical/battle-tested path narrows the gap."
-,France,Spain,style-web-layer,,,,0.53,0.47,0.70,"France's athletic transition threat is a strong counter to Spain's possession control."
+,France,Spain,style-web-layer,,,,0.53,0.47,0.70,France's athletic transition threat is a strong counter to Spain's possession control.
 ,Brazil,Mexico,style-web-layer,,,,0.58,0.42,0.65,"Mexico's momentum and crowd travel, but Brazil's individual quality and adjustment ability remain the edge."
 ,France,Morocco,style-web-layer,,,,0.70,0.30,0.75,"Morocco's low block lowers event rate, but France have too many transition and individual solutions."
-,Brazil,Argentina,style-web-layer,,,,0.46,0.54,0.60,"Argentina's knockout control narrowly outweighs Brazil's attacking talent."
-,Spain,Argentina,style-web-layer,,,,0.50,0.50,0.55,"Spain's form and press make this close; Argentina retain elite game-management."
+,Brazil,Argentina,style-web-layer,,,,0.46,0.54,0.60,Argentina's knockout control narrowly outweighs Brazil's attacking talent.
+,Spain,Argentina,style-web-layer,,,,0.50,0.50,0.55,Spain's form and press make this close; Argentina retain elite game-management.
+M89,Paraguay,France,knockout-context-2026,,,,0.18,0.82,0.75,"France's dominant form against Paraguay's penalty survival; France still clearly favored. Baseline 0.22 for Paraguay; net context shift -4 pct pts (tags + priority context, bounded)."
+M90,Canada,Morocco,knockout-context-2026,,,,0.39,0.61,0.7,"Morocco's penalty and low-block survival makes them favorites over a Canada side that advanced but looked less dangerous. Baseline 0.42 for Canada; net context shift -3 pct pts (tags + priority context, bounded)."
+M92,Mexico,England,knockout-context-2026,,,,0.54,0.46,0.7,"Mexico City altitude and home crowd against England's slow-start warning; Mexico slight favorite. Baseline 0.43 for Mexico; net context shift +11 pct pts (tags + priority context, bounded)."
+M93,Portugal,Spain,knockout-context-2026,,,,0.5,0.5,0.65,"Spain remain strong after the 3-0 over Austria, but Portugal's late comeback and transition threat make this near 50/50. Baseline 0.47 for Portugal; net context shift +3 pct pts (tags + priority context, bounded)."
+M94,United States,Belgium,knockout-context-2026,,,,0.46,0.54,0.65,"Belgium slight favorite only: comeback resilience tempered by a defensive warning, against a USA side that won cleanly at home. Baseline 0.41 for United States; net context shift +5 pct pts (tags + priority context, bounded)."
+M95,Argentina,Egypt,knockout-context-2026,,,,0.67,0.33,0.55,"Argentina favored over penalty-surviving Egypt, but a likely untested path reduces confidence. Baseline 0.72 for Argentina; net context shift -5 pct pts (tags + priority context, bounded). Baseline is a priority-table prior (pairing absent from matchup baselines). Provisional: Argentina not yet confirmed by a feeder result."
+M96,Switzerland,Colombia,knockout-context-2026,,,,0.34,0.66,0.6,"Colombia favored if they advance: battle-tested, against Switzerland's clean but less demanding run. Baseline 0.37 for Switzerland; net context shift -3 pct pts (tags + priority context, bounded). Provisional: Colombia not yet confirmed by a feeder result."
