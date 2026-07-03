@@ -96,6 +96,12 @@ matches:
       confidence: high
       reason: Mexico City altitude and home crowd.
       modifier: altitude_boost
+    - team: Mexico
+      category: venue
+      points: 3
+      confidence: medium
+      reason: Noon kickoff after the storm-related schedule change increases the Mexico City heat/altitude stress on England.
+      modifier: altitude_boost
   93:
     label: Portugal vs Spain
     adjustments:
