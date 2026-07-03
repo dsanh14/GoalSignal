@@ -16,6 +16,29 @@ directory is required by the base statistical pipeline.
 | `recent_form.csv` | `recent_form` | `team` | **opponent-adjusted** form, not raw results |
 | `venue_context.csv` | `venue_context` | `match_id` | host/travel/rest/climate, all per-match |
 | `expert_predictions.csv` | `expert` | `match_id` | structured LLM/expert probabilities + reasoning |
+| `team_styles.csv` | `knockout_upset` | `team` | 0-100 style indicators (low block, sterile possession, transition, set pieces…) |
+| `penalties.csv` | `knockout_upset` | `team` | penalty/keeper ratings + shootout records (shrunk toward 50/50) |
+| `knockout_results_2026.csv` | confirmed-results overlay | `match_number` | confirmed knockout results; winners override modal simulated winners in `tournament human-adjust` and propagate through the bracket. Scores include ET, exclude shootouts; blank scores = winner-only row |
+| `knockout_performance_tags.csv` | performance-tag nudges | `team` + `match_number` | hand-tagged knockout evidence (penalty wins, fatigue, late comebacks…); bounded net nudges for *later* matches, consumed by `tournament update-human-context` (or `human-adjust --tags`) |
+
+`team_styles.csv` and `penalties.csv` feed the **knockout-only** "survive and
+advance" signal — opt-in via `--include-knockout-upset`, applied to knockout
+matches only. See [docs/ensemble_signals.md](../../docs/ensemble_signals.md)
+("Why knockout prediction is different from group-stage prediction").
+
+`knockout_matchups.example.csv` is not a signal file: it is a forecast list of
+knockout ties (`match_id, stage, team_a, team_b` + optional
+`historical_team_a_advances/team_b_advances`) used by
+`goalsignal evaluate simulation-comparison` for before/after matchup diagnostics.
+
+`goalsignal tournament update-human-context` regenerates `recent_form.csv`
+(bounded deltas over the preserved `recent_form_base.csv` snapshot, audited in
+`recent_form_context_audit.csv`), the R16 rows of `expert_predictions.csv`
+(source_model `knockout-context-2026`), and the R16 blocks of
+`config/human_adjustments_2026.yaml` from the confirmed results + performance
+tags. It refuses to overwrite without `--force` and re-runs are idempotent.
+Do not pass `--tags` to `human-adjust` when using a YAML regenerated from the
+same tags — the evidence would count twice.
 
 Validate coverage at any time with:
 

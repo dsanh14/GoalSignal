@@ -1,0 +1,7 @@
+match_id,stage,team_a,team_b,historical_team_a_advances,historical_team_b_advances
+KO1,knockout,Spain,Morocco,0.70,0.30
+KO2,knockout,Brazil,Croatia,0.68,0.32
+KO3,knockout,Argentina,Paraguay,0.74,0.26
+KO4,knockout,Germany,Mexico,0.66,0.34
+KO5,knockout,Brazil,Canada,0.78,0.22
+KO6,knockout,Spain,Germany,0.55,0.45

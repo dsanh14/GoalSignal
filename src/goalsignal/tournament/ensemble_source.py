@@ -24,10 +24,18 @@ def build_ensemble_adapter(
     *,
     version: str = "final_ensemble",
     manual_dir: str | Path = "data/manual",
+    include_knockout_upset: bool = False,
 ) -> tuple[EnsembleGoalAdapter, EnsemblePredictor]:
-    """Build an ensemble simulation adapter backed by the live historical model."""
+    """Build an ensemble simulation adapter backed by the live historical model.
+
+    ``include_knockout_upset`` opts the knockout "survive and advance" signal
+    into knockout-tie resolution; it never affects group fixtures and leaves the
+    default (non-opted) path unchanged.
+    """
     config = load_ensemble_config()
-    inputs = load_manual_inputs(manual_dir, config)
+    inputs = load_manual_inputs(
+        manual_dir, config, include_knockout_upset=include_knockout_upset
+    )
     ensemble = MetaEnsemble(config)
     predictor = EnsemblePredictor(inputs, ensemble, LiveModelHistorical(live))
     base = RatingsGoalAdapter(live.ratings, live.goal_model)

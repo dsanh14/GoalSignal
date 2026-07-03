@@ -38,12 +38,52 @@ MatchesOpt = Annotated[
 VersionOpt = Annotated[
     str, typer.Option("--version", help="Ensemble model version (see config/ensemble.yaml).")
 ]
+KnockoutUpsetOpt = Annotated[
+    bool,
+    typer.Option(
+        "--include-knockout-upset/--no-knockout-upset",
+        help="Add the knockout-only 'survive and advance' signal (knockout matches only).",
+    ),
+]
 
 
 def _fmt_probs(probs: OutcomeProbs | AdvanceProbs) -> str:
     if isinstance(probs, OutcomeProbs):
         return f"H {probs.home_win:.3f} | D {probs.draw:.3f} | A {probs.away_win:.3f}"
     return f"A-adv {probs.team_a_advances:.3f} | B-adv {probs.team_b_advances:.3f}"
+
+
+def _echo_knockout_upset(spec, inputs, historical=None) -> None:
+    """Print the knockout survival adjustment's provenance for one tie.
+
+    Resolves the historical anchor the same way the prediction pipeline does so
+    the reported shift matches the blend: when a live historical provider is
+    given and the spec carries no historical advance, fill it from the model
+    (otherwise the anchor would wrongly default to 50/50).
+    """
+    from dataclasses import replace
+
+    from goalsignal.signals.base import AdvanceProbs
+    from goalsignal.signals.knockout_upset import knockout_upset_detail
+    from goalsignal.signals.pipeline import _base_advance, build_signals
+
+    if not isinstance(spec.historical, AdvanceProbs) and historical is not None:
+        sig = historical.advance(spec.team_a, spec.team_b, spec.neutral)
+        if sig.advance is not None:
+            spec = replace(spec, historical=sig.advance)
+    base = _base_advance(spec, build_signals(spec, inputs))
+    detail = knockout_upset_detail(
+        spec.team_a, spec.team_b, base_advance=base,
+        styles=inputs.styles, penalties=inputs.penalties,
+        params=inputs.knockout_upset_params,
+    )
+    if detail.advance is None:
+        typer.echo("    knockout_upset: inactive (no style/penalty evidence)")
+        return
+    typer.echo(
+        f"    knockout_upset: favorite={detail.favorite} underdog={detail.underdog} "
+        f"shift_to_underdog={detail.shift:+.3f} paths={detail.paths or 'none'}"
+    )
 
 
 @signals_app.command("validate")
@@ -56,6 +96,8 @@ def signals_validate(directory: DirOpt = Path("data/manual")) -> None:
     typer.echo(f"  recent-form teams:    {len(inputs.form.teams)}")
     typer.echo(f"  venue-context rows:   {len(inputs.venue)}")
     typer.echo(f"  expert matches:       {len(inputs.expert)}")
+    typer.echo(f"  team-style teams:     {len(inputs.styles.teams)}")
+    typer.echo(f"  penalty/shootout teams: {len(inputs.penalties.teams)}")
     if inputs.load_errors:
         typer.echo("Parse warnings (rows skipped):")
         for source, errs in inputs.load_errors.items():
@@ -93,13 +135,16 @@ def signals_blend(
     matches: MatchesOpt = Path("data/manual/matches.example.csv"),
     directory: DirOpt = Path("data/manual"),
     version: VersionOpt = "final_ensemble",
+    include_knockout_upset: KnockoutUpsetOpt = False,
     out: Annotated[
         Path | None, typer.Option("--out", help="Optional CSV path for blended output.")
     ] = None,
 ) -> None:
     """Blend all signals for each match under a named ensemble version."""
     config = load_ensemble_config()
-    inputs = load_manual_inputs(directory, config)
+    inputs = load_manual_inputs(
+        directory, config, include_knockout_upset=include_knockout_upset
+    )
     ensemble = MetaEnsemble(config)
     specs = load_matches(matches)
 
@@ -167,6 +212,7 @@ def signals_predict(
     matches: MatchesOpt = Path("data/manual/matches.example.csv"),
     directory: DirOpt = Path("data/manual"),
     version: VersionOpt = "final_ensemble",
+    include_knockout_upset: KnockoutUpsetOpt = False,
     live: Annotated[
         bool,
         typer.Option(
@@ -183,7 +229,9 @@ def signals_predict(
     from goalsignal.signals.api import EnsemblePredictor
 
     config = load_ensemble_config()
-    inputs = load_manual_inputs(directory, config)
+    inputs = load_manual_inputs(
+        directory, config, include_knockout_upset=include_knockout_upset
+    )
     historical = None
     if live:
         from goalsignal.cli import _live_model
@@ -197,6 +245,7 @@ def signals_predict(
     predictor = EnsemblePredictor(inputs, MetaEnsemble(config), historical)
     specs = load_matches(matches)
     preds = [predictor.predict(spec, version=version) for spec in specs]
+    spec_by_id = {s.match_id: s for s in specs}
     for p in preds:
         flag = " FLAG" if p.flagged else ""
         probs = " ".join(f"{k}={v:.3f}" for k, v in p.probs.to_dict().items())
@@ -206,6 +255,8 @@ def signals_predict(
             f"    used: {p.used_weights} | missing: {p.missing or 'none'} | "
             f"disagreement: {p.disagreement:.3f}{flag}"
         )
+        if include_knockout_upset and spec_by_id[p.match_id].knockout:
+            _echo_knockout_upset(spec_by_id[p.match_id], inputs, historical)
     if out is not None:
         import pandas as pd
 

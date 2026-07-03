@@ -58,7 +58,8 @@ review flag via `is_flagged`).
 | `market_only` | pure market benchmark |
 | `squad_form_challenger` | historical + squad + form |
 | `llm_adjusted_challenger` | historical + expert |
-| `final_ensemble` | all six signals at the default product weights |
+| `final_ensemble` | all signals at the default product weights (incl. the opt-in `knockout_upset` for knockout ties) |
+| `knockout_survival` | knockout-tuned profile that leans more on `market` and `knockout_upset` |
 
 ## Manual file schemas
 
@@ -93,10 +94,96 @@ the group triple, the knockout pair, or both; triples/pairs must sum to ~1
 (validated, then renormalized). Sources are combined by confidence-weighted
 consensus.
 
+**team_styles.csv** (`knockout_upset`, keyed by `team`): any subset of 0-100
+indicators `possession_heavy, low_block_defense, transition_threat,
+set_piece_threat, pressing_intensity, chance_creation, sterile_possession_risk,
+struggles_vs_low_block, defensive_compactness, attacking_directness,
+aerial_threat` (+ free-text `notes`). Each is centred at 50 and mapped to
+`[-1, 1]`; missing fields are neutral (no zero-fill of unknown style).
+
+**penalties.csv** (`knockout_upset`, keyed by `team`): current 0-100 ratings
+`penalty_strength, keeper_penalty_strength, penalty_taker_depth,
+tournament_experience, manager_continuity` and raw shootout records
+`shootout_wins/losses, world_cup_shootout_wins/losses,
+continental_shootout_wins/losses` (+ `notes`). Records are **shrunk toward
+50/50** before use; current keeper/taker ratings are weighted above old country
+history. See "Why knockout prediction is different" below.
+
 **matches.csv** (the forecast list): `match_id, stage, team_a, team_b` plus
 optional historical columns (`historical_home_win/draw/away_win` for groups,
 `historical_team_a_advances/team_b_advances` for knockouts). When the historical
 columns are absent that signal is simply missing and the ensemble renormalizes.
+
+## Why knockout prediction is different from group-stage prediction
+
+Group-stage forecasting asks **who is better** over 90 minutes. For knockouts,
+GoalSignal models not only who is better, but **who can survive and advance**.
+Underdogs with compact defense, low expected-goals matchups, penalty strength,
+and favorable style matchups receive a controlled upset-path adjustment.
+
+The `knockout_upset` signal (`signals/knockout_upset.py`) is **knockout-only**
+and **opt-in** (`--include-knockout-upset`). For group matches it is never
+produced; for knockout matches without the flag it is also absent and the
+ensemble renormalizes — so the default path is unchanged.
+
+**Explicit advance model.** A knockout is resolved in stages, so winning in 90
+minutes and advancing are not the same thing:
+
+```
+P(F advances) = P(F wins in regulation)
+              + P(regulation draw) * [ P(F wins ET)
+                                      + P(ET draw) * P(F wins shootout) ]
+```
+
+Expected goals split the favourite/underdog Poisson means **multiplicatively**
+(ratio-preserving), so a low-event, compact matchup scales both means down,
+**raises the draw mass**, and routes more of the favourite's edge through the
+near-coin-flip extra-time/penalty path — exactly where a survival-minded
+underdog gains. (An additive goal margin would wrongly inflate the favourite's
+relative edge as goals fall.) Regulation, extra time (one-third intensity), and
+the shootout reuse the same staging as `tournament/knockout.py`.
+
+**Anchored, so it never randomly boosts underdogs.** The signal starts from a
+base advance estimate (the historical model, else market, else squad, else
+50/50), re-derives advance through the staged model **with** and **without** the
+style/penalty evidence, and applies only the *difference*. With no style or
+penalty data for either side it abstains (returns `None`); with normal,
+high-event inputs the difference is tiny. The per-match shift is hard-capped
+(`max_advance_shift`, default 0.15) and the blend weight is small (0.05), so the
+net move on the final ensemble is modest by construction.
+
+**Penalty/shootout history is a shrunk prior.** Shootout records are tiny
+samples, so each is Beta-shrunk toward 50/50 before use:
+`(wins + 0.5k) / (wins + losses + k)` with `k = shootout_prior_strength`
+(default 6) — a 4–0 record reads as 0.70, a 1–0 record barely moves off 0.5.
+Current keeper and penalty-taker strength are weighted **above** old country
+history (`current_pen_weight` 0.7 vs `history_pen_weight` 0.3); World Cup
+shootouts are weighted above continental and friendly records. The two teams'
+ratings give a head-to-head shootout probability whose deviation from 0.5 is
+hard-capped (`shootout_cap`, default 0.12) — a strong pedigree yields ~0.56/0.44,
+never a deterministic "this country always wins penalties". Because the shootout
+only resolves the penalty-path mass, **it only meaningfully moves the advance
+probability when the draw/extra-time probability is high**: in a likely blowout
+it barely registers.
+
+**Style matchup features** detect upset-prone *shapes* rather than boosting all
+underdogs. Each contributes a bounded, explainable adjustment with a provenance
+tag:
+
+| Shape | Effect | Provenance tag |
+| --- | --- | --- |
+| possession-heavy favourite that struggles to break a real low block | shrinks the favourite's regulation edge | `low_block_survival_path` |
+| favourite with sterile possession / weak chance creation | suppresses goals and shrinks the edge | `favorite_sterile_possession_risk` |
+| underdog with strong transition threat | shrinks the favourite's edge | `transition_threat` |
+| underdog with set-piece / aerial threat | shrinks the favourite's edge | `set_piece_underdog_path` |
+| underdog low block / compactness | suppresses expected goals → more penalties | (raises draw mass) |
+| underdog with shootout/keeper/taker edge in a draw-likely tie | tilts the penalty path | `penalty_path_boost` |
+
+All coefficients live under `signal_params.knockout_upset` in
+`config/ensemble.yaml` and are modest, bounded priors — **not fitted** to match
+results (no leakage). The matchup types this targets: a stronger favourite upset
+on penalties, a compact side surviving a possession-heavy favourite, and ties
+where extra time and penalties are a genuine path to advance.
 
 ## Evaluation
 
@@ -175,8 +262,23 @@ and is then resolvable by the normalized pair. **Precedence (highest first):**
    advantage is negated).
 
 Team names are normalized (trimmed, casefolded, whitespace-collapsed). Venue rows
-may also carry a `stage` label. `squad_strength` and `recent_form` are already
-team-keyed, so they attach to any matchup without extra columns.
+may also carry a `stage` label. `squad_strength`, `recent_form`, `team_styles`,
+and `penalties` are already team-keyed, so they attach to any matchup without
+extra columns.
+
+**Full lookup precedence** used for a (possibly dynamically generated) knockout
+pairing, highest priority first:
+
+1. `match_id`, when available;
+2. normalized team pair **+ stage** (forward orientation), when a row carries one;
+3. normalized team pair (forward, then reverse with a flip);
+4. team-level features (`squad_strength`, `recent_form`, `team_styles`,
+   `penalties`), which are keyed by team and always resolve.
+
+`match_id` always wins over a team-pair hit. The `knockout_upset` signal consumes
+team-level style/penalty tables (step 4) and is anchored on the best available
+advance estimate (historical → market → squad → 50/50), so it attaches to
+dynamic knockout pairings that have no `match_id`.
 
 ## CLI
 
@@ -190,7 +292,130 @@ goalsignal signals tune-weights    # validation-only weight tuning -> artifact +
 goalsignal evaluate ensemble-backtest          # compare versions (--predictions for real data)
 goalsignal evaluate ensemble-ablation          # which signals actually help
 goalsignal tournament simulate --prediction-source ensemble   # opt-in ensemble sim
+
+# Knockout "survive and advance" layer (opt-in; knockout matches only):
+goalsignal signals predict --matches data/manual/matches.example.csv \
+    --include-knockout-upset
+goalsignal tournament simulate --prediction-source ensemble \
+    --ensemble-version knockout_survival --include-knockout-upset \
+    --sims 100000 --seed 20260612
+
+# Comparison report across the three simulation sources:
+goalsignal evaluate simulation-comparison           # reads existing artifacts
+goalsignal evaluate simulation-comparison --live    # live-model matchup diagnostics
 ```
+
+## Simulation comparison report
+
+`evaluate simulation-comparison`
+(`evaluation/simulation_comparison.py`) is **read-only** over existing
+simulation artifacts — it never re-runs the simulator or overwrites a run. It
+auto-discovers the newest `baseline` (historical), `final_ensemble`, and
+`knockout_survival` runs under `artifacts/simulations/` (override with
+`--baseline`/`--final-ensemble`/`--knockout-survival`) and writes four artifacts
+to `artifacts/ensemble/`:
+
+| Artifact | Contents |
+| --- | --- |
+| `simulation_comparison.csv` | per-team semifinal/final/champion probs for each run + pairwise deltas |
+| `biggest_movers.csv` | the largest absolute moves (`team, stage, comparison, from_prob, to_prob, delta, abs_delta`) |
+| `knockout_survival_explanations.csv` | per-matchup before/after advance with the `knockout_upset` decomposition |
+| `simulation_comparison.md` | the honest narrative report |
+
+The report answers: which teams' champion/semifinal/final probabilities moved
+most; which knockout matchups shifted and **how much of that came from
+`knockout_upset`** (the `net_move_from_upset` column, separate from the version
+change); which ties were flagged high-disagreement; and which signals were
+missing or illustrative. The matchup diagnostics use the matches CSV
+(`--matches`, default `data/manual/knockout_matchups.example.csv`) for the
+baseline advance, or the trained model with `--live`.
+
+If a run is missing, its comparisons are omitted and the report says so — the
+command never crashes on a partial set. It deliberately makes **no accuracy
+claim**: it shows what moved and why, not that the movement is correct.
+
+## Human-adjusted scenario analysis
+
+A winner-only **scenario analysis layer** — an **opinion overlay** on an
+existing simulation, distinct from the fitted/blended signals above and never
+part of any ensemble version.
+
+**Why opinions live in YAML, not Python.** All match/team adjustments sit in
+`config/human_adjustments_2026.yaml` with a required `reason` and optional
+`confidence` per entry. Views change by editing configuration; the code only
+validates, applies, caps, and reports them, so every subjective claim is
+auditable and diffable.
+
+**How caps and validation prevent uncontrolled manual edits.** Points are
+percentage points on one team's advance probability, bounded three ways:
+`max_single_adjustment_pct` per entry, `max_total_adjustment_pct` per team and
+per match (the net delta is capped again), and `min/max_probability` clipping.
+A fixed category/modifier taxonomy (venue, injuries, tournament_form,
+opponent_quality, style_matchup, expert_override) plus hard errors on unknown
+teams, unknown categories, missing reasons, or non-knockout match numbers keep
+the file from drifting into arbitrary edits.
+
+**How flips propagate.** `goalsignal tournament human-adjust` walks the
+official M73–M104 graph (`OfficialBracket`): each match's adjusted winner
+fills the real `W`/`L` advancement slots of later matches, and each propagated
+pairing is priced with *its own* simulated conditional advance probability
+from the run's matchup CSVs. The CSV also records the parallel **unadjusted
+walk**, so the comparison report attributes downstream pairing changes to
+opinion flips exactly rather than diffing against per-match modal summaries.
+
+**Why nothing else is modified.** The layer is read-only over the simulation
+directory: model probabilities, `config/ensemble.yaml`, the prediction ledger,
+the result store, and all original simulation artifacts stay untouched.
+Outputs are new files (`human_adjusted_bracket.{csv,md}`,
+`human_adjusted_meta.json`) that refuse to overwrite without `--force`.
+
+**Comparison report.** `goalsignal tournament compare-scenarios
+--simulation-dir artifacts/simulations/<run-dir>` compares the model-only
+modal bracket, the knockout-survival modal bracket, and the human-adjusted
+scenario side by side, writing `scenario_comparison.{md,csv}`,
+`scenario_biggest_movers.csv`, and `scenario_flips.csv` into the run
+directory (`--out-dir` to redirect, `--force` to overwrite). Missing scenarios
+are reported as unavailable, never fatal.
+
+**Interpreting the caveats.** Every report states them: human adjustments are
+scenario analysis, not calibrated forecasts; adjusted probabilities rank one
+fixed bracket path; downstream pairings assume earlier scenario picks are
+correct; and the layer is for stress-testing tactical opinions, not for
+claiming improved accuracy.
+
+## Status: production-grade vs experimental
+
+**Production-grade** (validated, stable, safe to rely on):
+
+- signal validation and coverage reporting (`signals validate`);
+- typed probability objects (`OutcomeProbs` / `AdvanceProbs`) that always
+  normalize and never go negative;
+- missing-signal renormalization in the meta-ensemble;
+- opt-in ensemble simulation that leaves the historical default byte-for-byte
+  unchanged and writes to distinct artifact directories;
+- the test suite and full-simulator invariant checks.
+
+**Experimental** (use as a controlled, explainable nudge — not evidence):
+
+- the `knockout_upset` survival coefficients;
+- the penalty/shootout priors;
+- the style-matchup coefficients;
+- the absence of a chronological knockout backtest;
+- manual/example data coverage (illustrative fixtures, not real data).
+
+**Do not claim:**
+
+- that the knockout survival layer **improves accuracy** — it has not been
+  backtested out-of-sample;
+- that penalty/shootout history is **highly predictive** — it is shrunk toward
+  50/50, capped, and only matters when a tie is likely to reach penalties;
+- that Croatia-style (or any) teams are **guaranteed to win penalties** — the
+  shootout edge is a small bounded nudge, never a deterministic rule.
+
+`--include-knockout-upset` adds the signal to knockout ties only; group fixtures
+and the default historical path are unaffected. Ensemble runs with the flag
+write to a distinct `*.ensemble-<version>.ko-upset` artifact directory so they
+never overwrite the canonical historical simulation.
 
 ## Assumptions and limitations
 
@@ -201,4 +426,10 @@ goalsignal tournament simulate --prediction-source ensemble   # opt-in ensemble 
   deployment-grade.
 - The knockout reduction (`advance_from_outcome`) is a closed-form simplification
   of the staged simulator in `tournament/knockout.py`.
+- **`knockout_upset` is experimental.** Its coefficients are bounded priors, not
+  fitted to results; the staged advance model uses a calibrated expected-goals
+  fallback rather than per-team xG; and it has not yet been validated on a
+  chronological knockout backtest (knockout shootout outcomes are rare, so a
+  clean out-of-sample evaluation needs care). Treat it as a controlled,
+  explainable nudge, not a tuned model — it is intentionally weighted at 0.05.
 - The example CSVs are illustrative fixtures, not real data.

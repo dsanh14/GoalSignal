@@ -1,0 +1,27 @@
+team,column,base_value,delta,updated_value,reasons
+Argentina,elo_adj_last5,0.58,-0.04,0.54,"-4 [not_tested M86] If Argentina beat Cape Verde comfortably, easy path continues (provisional; M86 not confirmed)"
+Argentina,xg_diff,0.54,-0.04,0.5,"-4 [not_tested M86] If Argentina beat Cape Verde comfortably, easy path continues (provisional; M86 not confirmed)"
+Belgium,elo_adj_last5,0.26,0.01,0.27,+4 [late_comeback M82] Came from 0-2 down vs Senegal | -3 [defensive_warning M82] Conceded twice before comeback
+Belgium,xg_diff,0.18,0.01,0.19,+4 [late_comeback M82] Came from 0-2 down vs Senegal | -3 [defensive_warning M82] Conceded twice before comeback
+Canada,elo_adj_last5,0.12,0.01,0.13,+1 [narrow_win M73] Edged South Africa 1-0; advanced but rarely looked dangerous
+Canada,xg_diff,0.02,0.01,0.03,+1 [narrow_win M73] Edged South Africa 1-0; advanced but rarely looked dangerous
+Colombia,elo_adj_last5,0.3,0.05,0.35,+5 [battle_tested M87] Battle-tested if they advance past Ghana (provisional; M87 not confirmed)
+Colombia,xg_diff,0.24,0.05,0.29,+5 [battle_tested M87] Battle-tested if they advance past Ghana (provisional; M87 not confirmed)
+England,elo_adj_last5,0.2,-0.02,0.18,"+2 [late_comeback M80] Trailing to DR Congo, came back late to advance | -4 [defensive_warning M80] Trailed DR Congo until minute 75; slow-start warning against a much weaker opponent"
+England,xg_diff,0.16,-0.02,0.14,"+2 [late_comeback M80] Trailing to DR Congo, came back late to advance | -4 [defensive_warning M80] Trailed DR Congo until minute 75; slow-start warning against a much weaker opponent"
+France,elo_adj_last5,0.78,0.05,0.83,+5 [dominant_win M77] Beat Sweden 3-0
+France,xg_diff,0.72,0.05,0.77,+5 [dominant_win M77] Beat Sweden 3-0
+Mexico,elo_adj_last5,0.42,0.02,0.44,+2 [dominant_win M79] Handled Ecuador cleanly
+Mexico,xg_diff,0.34,0.02,0.36,+2 [dominant_win M79] Handled Ecuador cleanly
+Morocco,elo_adj_last5,0.32,0.04,0.36,+3 [penalty_win M75] Advanced on penalties over Netherlands | +3 [low_block_success M75] Low block held Netherlands to 1-1 across 120 minutes | -2 [extra_time_fatigue M75] Played 120 minutes plus a shootout against Netherlands
+Morocco,xg_diff,0.22,0.04,0.26,+3 [penalty_win M75] Advanced on penalties over Netherlands | +3 [low_block_success M75] Low block held Netherlands to 1-1 across 120 minutes | -2 [extra_time_fatigue M75] Played 120 minutes plus a shootout against Netherlands
+Paraguay,elo_adj_last5,0.18,0.01,0.19,+3 [penalty_win M74] Advanced on penalties over Germany | -2 [extra_time_fatigue M74] Played 120 minutes plus a shootout against Germany
+Paraguay,xg_diff,0.04,0.01,0.05,+3 [penalty_win M74] Advanced on penalties over Germany | -2 [extra_time_fatigue M74] Played 120 minutes plus a shootout against Germany
+Portugal,elo_adj_last5,0.18,0.04,0.22,+4 [late_comeback M83] Came back vs Croatia with 90+4 winner
+Portugal,xg_diff,0.14,0.04,0.18,+4 [late_comeback M83] Came back vs Croatia with 90+4 winner
+Spain,elo_adj_last5,0.7,0.05,0.75,+5 [dominant_win M84] Beat Austria 3-0
+Spain,xg_diff,0.68,0.05,0.73,+5 [dominant_win M84] Beat Austria 3-0
+Switzerland,elo_adj_last5,0.22,0.02,0.24,+2 [dominant_win M85] Clean 2-0 win over Algeria
+Switzerland,xg_diff,0.16,0.02,0.18,+2 [dominant_win M85] Clean 2-0 win over Algeria
+United States,elo_adj_last5,0.16,0.03,0.19,+3 [dominant_win M81] Clean 2-0 win over Bosnia and Herzegovina
+United States,xg_diff,0.08,0.03,0.11,+3 [dominant_win M81] Clean 2-0 win over Bosnia and Herzegovina

@@ -439,6 +439,204 @@ existing command.
   the baseline. Provide real market/squad/form/venue/expert coverage, then re-run
   the real backtest + ablation before considering promotion.
 
+#### Knockout "survive and advance" layer (2026-06-29, opt-in, experimental)
+
+- **Signal** (`signals/knockout_upset.py`): knockout-only advance adjustment.
+  Models `P(advance) = P(win reg) + P(draw)·P(win ET/pens)` with a staged
+  regulation/ET/penalty model (reuses the `tournament/knockout.py` staging;
+  skellam from scipy). Expected goals split favourite/underdog Poisson means
+  **multiplicatively** so a low-event/compact tie raises draw mass and routes the
+  favourite's edge through the coin-flip path. **Anchored**: re-derives advance
+  with vs without style/penalty evidence and applies only the difference, so no
+  evidence ⇒ exactly no change (returns `None`). Per-match shift hard-capped
+  (`max_advance_shift` 0.15); blend weight 0.05.
+- **Inputs** (file-first, team-keyed, both optional): `data/manual/team_styles.csv`
+  (0-100 style indicators) and `data/manual/penalties.csv` (current keeper/taker
+  ratings + shootout records). Shootout history is **Beta-shrunk toward 50/50**
+  (`shootout_prior_strength`), current ratings weighted above old country history,
+  head-to-head shootout deviation capped (`shootout_cap` 0.12). Penalties only
+  move advance meaningfully when draw/ET prob is high. Provenance tags:
+  `low_block_survival_path`, `favorite_sterile_possession_risk`,
+  `transition_threat`, `set_piece_underdog_path`, `penalty_path_boost`.
+- **Config** (`config/ensemble.yaml`): `knockout_upset: 0.05` added to
+  `final_ensemble`; new `knockout_survival` version (market/upset-leaning);
+  `signal_params.knockout_upset` block of bounded, **unfitted** coefficients.
+  Absent for group matches and for non-opted knockout runs ⇒ renormalized away ⇒
+  default behavior byte-for-byte unchanged.
+- **CLI**: `goalsignal signals predict|blend --include-knockout-upset` and
+  `goalsignal tournament simulate --prediction-source ensemble
+  --include-knockout-upset` (group stage + historical path untouched; ensemble
+  upset runs write a distinct `*.ko-upset` artifact dir). Lookup precedence
+  documented: match_id > pair+stage > pair > team-level features.
+- **Tests:** `tests/unit/test_knockout_upset.py` (21). Suite **300 passed**,
+  ruff clean.
+- **Open / experimental:** coefficients are priors, not fitted; uses a calibrated
+  eg fallback (no per-team xG); not yet validated on a chronological knockout
+  backtest (shootout outcomes are rare). Do not promote as default.
+
+#### Simulation comparison report (2026-06-29, read-only diagnostics)
+
+- **Module** (`evaluation/simulation_comparison.py`) + CLI `goalsignal evaluate
+  simulation-comparison`. **Read-only** over existing `artifacts/simulations/`
+  runs — never re-runs or overwrites the simulator. Auto-discovers newest
+  baseline (historical) / final_ensemble / knockout_survival runs by classifying
+  their `wc2026_tournament_meta.json` (override with
+  `--baseline/--final-ensemble/--knockout-survival`). Graceful on a missing run.
+- **Writes 4 artifacts to `artifacts/ensemble/`:** `simulation_comparison.csv`
+  (per-team semifinal/final/champion + pairwise deltas), `biggest_movers.csv`
+  (`team,stage,comparison,from_prob,to_prob,delta,abs_delta`),
+  `knockout_survival_explanations.csv` (per-matchup before/after advance +
+  knockout_upset decomposition: internal shift, `net_move_from_upset`, draw prob,
+  E[goals], penalty-path contribution, style/penalty/provenance tags),
+  `simulation_comparison.md` (honest narrative). Matchup diagnostics use
+  `--matches` (default `data/manual/knockout_matchups.example.csv`) or `--live`.
+- **Honesty:** the MD report has explicit production-grade vs experimental
+  sections and a "not claimed" block (no accuracy claim; penalty history not
+  highly predictive; no guaranteed shootout winners). Separates the *version*
+  effect from the *knockout_upset* effect (`net_move_from_upset`).
+- **Tests:** `tests/unit/test_simulation_comparison.py` (8). Suite **308 passed**,
+  ruff clean.
+
+#### Winner-only human adjustment layer (2026-07-02, opt-in challenger)
+
+- **Module** (`tournament/human_adjustments.py`) + CLI `goalsignal tournament
+  human-adjust --simulation-dir <dir> --config config/human_adjustments_2026.yaml
+  [--force]`. **Read-only over an existing simulation directory** — never re-runs
+  or overwrites the simulator; never touches `Datasets/`, the ledger, the result
+  store, or the deployed model. Defaults to the newest full-tournament run.
+- **Opinions live in YAML, not Python** (`config/human_adjustments_2026.yaml`):
+  per-match, per-team signed percentage-point adjustments with required `reason`,
+  optional `modifier`/`confidence` (low|medium|high, annotation only — no
+  scaling). Taxonomy: venue / injuries / tournament_form / opponent_quality /
+  style_matchup / expert_override with fixed modifier lists (a known modifier
+  name may be used directly as `category`). Global caps:
+  `max_total_adjustment_pct` (per-team sum AND net delta), `max_single_adjustment_pct`,
+  `min/max_probability` clipping. Strict validation (unknown category/team,
+  missing reason, out-of-range points, non-knockout match numbers all error).
+- **Method:** baseline = each pairing's simulated
+  `conditional_slot_1_win_probability` (advance = reg+ET+pens as simulated) from
+  the round matchup CSVs, either orientation; unseen pairings fall back to a
+  flagged neutral 0.5. Winners are fixed by adjusted probability and propagated
+  deterministically through the official `OfficialBracket` M73-M104 graph
+  (R32 entrants from the run's modal bracket — never fabricated). Adjustments
+  whose team is not in the propagated pairing are skipped with a warning.
+- **Artifacts** (inside the sim dir, refuse overwrite without `--force`):
+  `human_adjusted_bracket.csv`, `human_adjusted_bracket.md` (provenance + method
+  + full bracket path + per-adjustment audit trail + warnings + caveats),
+  `human_adjusted_meta.json` (config hash, source-sim provenance, counts).
+- **Verified real run** on `b1bfd6e3fb69c758.ensemble-knockout_survival.ko-upset`:
+  32 knockout matches, 3 adjusted (M92/M93/M100 per config), 1 winner flipped
+  (M92 England→Mexico, 0.392→0.532), champion Argentina; M99 correctly
+  re-paired to Brazil vs Mexico downstream.
+- **Tests:** `tests/unit/test_human_adjustments.py` (19, synthetic fictional
+  teams). Suite **327 passed**, ruff clean.
+- **Honesty:** winner-only opinion layer — not a fitted model, no accuracy claim,
+  probabilities are not calibrated forecasts, nothing written to the ledger, and
+  no challenger promotion.
+
+#### Scenario comparison report (2026-07-02, read-only presentation)
+
+- **Module** (`tournament/scenario_comparison.py`) + CLI `goalsignal tournament
+  compare-scenarios --simulation-dir <dir> [--baseline-dir --knockout-survival-dir
+  --out-dir --force]`. Compares three knockout views per match: **model-only**
+  modal bracket (historical run), **knockout_survival** modal bracket, and the
+  **human-adjusted scenario** (`human_adjusted_bracket.csv`). Baseline/ko runs
+  auto-discovered via `evaluation.simulation_comparison.discover_sim_runs`;
+  any missing scenario is reported as unavailable, never fatal (fails only when
+  *no* scenario exists). Read-only over all inputs.
+- **Artifacts** (default into the primary sim dir; refuse overwrite without
+  `--force`): `scenario_comparison.md` (headline, champions per scenario,
+  availability, opinion flips + downstream effects, biggest movers, per-match
+  table, "Scenario, not forecast" + caveats), `scenario_comparison.csv`
+  (per-match winners/probs/net points/flip/reason/confidence/provenance),
+  `scenario_biggest_movers.csv` (`comparison, match_number, stage, subject,
+  from_prob, to_prob, delta` — human overlay vs its baseline AND
+  knockout_survival vs model_only on shared modal pairings),
+  `scenario_flips.csv` (flipped matches + `downstream_effects`).
+- **Exact flip attribution:** `human-adjust` now also records the parallel
+  **unadjusted walk** per match (`unadjusted_team_1/2`, `unadjusted_winner`
+  columns + `adjustment_reasons`/`adjustment_confidences`; additive, older
+  CSVs still load). Downstream tracing diffs adjusted vs unadjusted walks —
+  exact attribution — and falls back to the run's modal bracket (flagged,
+  since modal chains can differ independently of a flip) for old CSVs.
+- **Language policy:** reports use "human-adjusted scenario" / "opinion
+  overlay" / "scenario analysis layer", never claim accuracy, and state that
+  the ledger and original simulation artifacts are untouched.
+- **Verified real run** on `b1bfd6e3fb69c758.ensemble-knockout_survival.ko-upset`
+  vs baseline `b1bfd6e3fb69c758`: 32 matches, 3 adjusted, 1 flip (M92
+  England→Mexico) with exactly 3 attributable downstream pairing changes
+  (M99, M102, M103), champion unchanged (Argentina in all three scenarios),
+  0 model-only vs ko-survival modal-pick disagreements.
+- **Tests:** `tests/unit/test_scenario_comparison.py` (12, synthetic fictional
+  teams: all files written, missing-human and missing-ko grace, flips CSV,
+  movers columns/ordering, exact + fallback downstream tracing, scenario
+  language, Markdown table column consistency (reason pipes re-joined with
+  semicolons), source-artifact immutability, `--force` semantics). Suite
+  **339 passed**, ruff clean.
+- **Demo docs:** `docs/demo_walkthrough.md` — 5-minute reviewer walkthrough
+  with a real `scenario_comparison.md` excerpt and a "How to reproduce the
+  Mexico upset scenario" section; linked from the top of `README.md`.
+
+#### Live knockout context overlay (2026-07-03, opt-in manual layers)
+
+- **Confirmed results overlay** (`tournament/knockout_results.py`,
+  `data/manual/knockout_results_2026.csv`): hand-entered confirmed knockout
+  results (schema `match_number,round,team_a,team_b,score_a,score_b,aet,
+  penalties,winner,notes`; scores include ET / exclude shootouts per rule 4;
+  blank scores = winner-only row; strict validation incl. winner-vs-score
+  consistency and official round). `tournament human-adjust` loads it by
+  default when present (`--results`/`--ignore-results`): confirmed pairings
+  and winners **override modal simulated picks in both walks**, propagate
+  through the M73-M104 graph (e.g. penalty winners Paraguay/Morocco/Egypt
+  replace modal Germany/Netherlands/Australia in R16), never count as opinion
+  flips (`winner_changed=false`, `baseline_source=confirmed_result`, new CSV
+  columns `confirmed_result`/`decided_by` — additive, older readers fine).
+- **Performance tags** (`tournament/performance_tags.py`,
+  `data/manual/knockout_performance_tags.csv`, schema
+  `team,match_number,tag,points,reason`): 14-tag vocabulary (dominant_win,
+  penalty_win, extra_time_fatigue, late_comeback, late_collapse_warning,
+  blew_lead, survived_pressure, low_block_success, altitude_edge, not_tested,
+  battle_tested, narrow_win, finishing_boost, defensive_warning) with
+  expected-sign + |points|≤10 validation and a fixed mapping into the
+  existing adjustment taxonomy. A tag earned in match N nudges only matches
+  > N; per-team net capped at ±6 (`tag_nudge`), then subject to the existing
+  total caps/clipping. Opt-in in `human-adjust` via `--tags` (columns
+  `tag_points_team_1/2`, `tag_reasons`) — do NOT combine with a YAML
+  regenerated from the same tags (double count).
+- **`tournament update-human-context`** (`tournament/human_context.py`):
+  resolves real/provisional R16 pairings from confirmed R32 winners through
+  the official graph, then regenerates (refusing without `--force`,
+  idempotent): R16 blocks of `config/human_adjustments_2026.yaml` (other
+  matches preserved; merged YAML validated through the strict loader before
+  writing; hand-written comments are replaced by a managed header),
+  `expert_predictions.csv` R16 rows under source_model
+  `knockout-context-2026` (matchup baseline ± bounded shift, reasons
+  embedded), and `recent_form.csv` (deltas capped ±6 pct pts over a
+  preserved `recent_form_base.csv` snapshot; audit in
+  `recent_form_context_audit.csv`; teams without a base row skipped, never
+  invented). Priority R16 opinions live in `R16_PRIORITY` (editable
+  declarative table incl. Mexico altitude +7, USA home +3, Portugal
+  transition +4, Argentina/Colombia provisional fallbacks).
+- **Verified real run** on `b1bfd6e3fb69c758.ensemble-knockout_survival.
+  ko-upset`: 12 confirmed R32 results propagate the live R16 bracket
+  (M89 Paraguay-France … M95 Argentina-Egypt, M96 Switzerland-Colombia;
+  M76/78/86/87 honestly unconfirmed, M91 skipped); expert leanings M89 0.18,
+  M90 0.39, M92 0.54, M93 0.50, M94 0.46, M95 0.67 (confidence 0.55),
+  M96 0.34; walk flips exactly M92 England→Mexico (0.392→0.502) with 3
+  attributable downstream changes; champion Argentina; compare-scenarios
+  reads the new columns cleanly.
+- **Tests:** `test_knockout_results.py` (13), `test_performance_tags.py` (14),
+  `test_human_context.py` (11), `test_human_adjustments.py` +10 (confirmed
+  overrides modal, penalty propagation, downstream re-pairing, bounded tag
+  nudges). Suite **389 passed** + ruff clean; 2 failures pre-existing on this
+  branch (header-only `market_odds.csv` breaks `test_keying.py::test_existing_
+  match_id_only_files_still_work` and `test_signals_pipeline.py::test_cli_
+  signals_blend_all_versions_run[market_only]` — verified present with all
+  new changes stashed).
+- **Honesty:** overlays are facts (results) + bounded opinions (tags/priors);
+  no fitted coefficients, no accuracy claim, ledger/result store/`Datasets/`
+  untouched, base model unchanged.
+
 ## Conventions
 
 - Python 3.12, uv-managed. Ruff (line length 100); pytest; all tests must pass
