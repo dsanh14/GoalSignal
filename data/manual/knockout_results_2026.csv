@@ -13,5 +13,7 @@ match_number,round,team_a,team_b,score_a,score_b,aet,penalties,winner,notes
 86,round_of_32,Argentina,Cabo Verde,3,2,true,false,Argentina,"Went to extra time; Cabo Verde played well and were unlucky to concede a late own goal"
 87,round_of_32,Colombia,Ghana,1,0,false,false,Colombia,"Colombia scored early (14') but couldn't add to it and close out the game"
 88,round_of_32,New Zealand,Egypt,1,1,true,true,Egypt,"Egypt won penalties 4-2 (corrected opponent name from Australia to New Zealand)"
+76,round_of_32,Brazil,Japan,2,1,false,false,Brazil,"Trailed Japan from minute 33; scored twice in the final 20 minutes to complete the comeback"
+78,round_of_32,Ivory Coast,Norway,1,2,false,false,Norway,"Drew level before Norway retook the lead within 10 minutes"
 89,round_of_16,Paraguay,France,0,1,false,false,France,"Mbappe penalty"
 90,round_of_16,Canada,Morocco,0,3,false,false,Morocco,

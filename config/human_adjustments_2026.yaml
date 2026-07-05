@@ -69,6 +69,28 @@ matches:
       confidence: medium
       reason: '[extra_time_fatigue M75] Played 120 minutes plus a shootout against Netherlands'
       modifier: extra_time_fatigue_penalty
+  91:
+    label: Brazil vs Norway
+    adjustments:
+    - team: Brazil
+      category: tournament_form
+      points: 2.0
+      confidence: medium
+      reason: '[late_comeback M76] Trailed Japan from minute 33; came back to win in the final
+        20 minutes'
+      modifier: late_comeback_boost
+    - team: Brazil
+      category: tournament_form
+      points: -2.0
+      confidence: medium
+      reason: '[defensive_warning M76] Trailed a much lower-ranked Japan side from the 33rd
+        minute'
+    - team: Norway
+      category: tournament_form
+      points: 1.0
+      confidence: medium
+      reason: '[narrow_win M78] Edged Ivory Coast 2-1 after Ivory Coast drew level; regained
+        the lead within 10 minutes'
   92:
     label: Mexico vs England
     adjustments:
