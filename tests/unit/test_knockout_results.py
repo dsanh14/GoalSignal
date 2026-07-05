@@ -107,7 +107,7 @@ def test_repository_default_results_file_is_valid():
     assert results, "tracked knockout_results_2026.csv should not be empty"
     for result in results.values():
         assert isinstance(result, KnockoutResult)
-        assert result.round == "round_of_32"
+        assert result.round in ("round_of_32", "round_of_16")
     # Penalty wins recorded with score semantics (level after ET).
     penalty_winners = {
         r.winner for r in results.values() if r.decided_by == "penalties"
