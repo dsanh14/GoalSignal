@@ -357,7 +357,7 @@ def test_real_r16_pairings_from_tracked_results():
     assert (pairings[94].team_a, pairings[94].team_b) == (
         "United States", "Belgium"
     )
-    assert pairings[95].team_b == "Egypt"
-    assert pairings[95].provisional == ("Argentina",)
-    assert pairings[96].team_a == "Switzerland"
-    assert pairings[96].provisional == ("Colombia",)
+    assert (pairings[95].team_a, pairings[95].team_b) == ("Argentina", "Egypt")
+    assert pairings[95].provisional == ()
+    assert (pairings[96].team_a, pairings[96].team_b) == ("Switzerland", "Colombia")
+    assert pairings[96].provisional == ()

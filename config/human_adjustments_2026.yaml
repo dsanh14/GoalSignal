@@ -96,6 +96,13 @@ matches:
       confidence: high
       reason: Mexico City altitude and home crowd.
       modifier: altitude_boost
+    - team: Mexico
+      category: venue
+      points: 3
+      confidence: medium
+      reason: Unbeaten (3-0) at Estadio Azteca this tournament; kickoff confirmed for its
+        original 6pm local/8pm ET slot despite storm-related rumors of a move to noon.
+      modifier: home_host_boost
   93:
     label: Portugal vs Spain
     adjustments:
