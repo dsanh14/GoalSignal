@@ -60,6 +60,7 @@ review flag via `is_flagged`).
 | `llm_adjusted_challenger` | historical + expert |
 | `final_ensemble` | all signals at the default product weights (incl. the opt-in `knockout_upset` for knockout ties) |
 | `knockout_survival` | knockout-tuned profile that leans more on `market` and `knockout_upset` |
+| `context_challenger` | opt-in late-information profile with bounded, timestamped `match_context` evidence |
 
 ## Manual file schemas
 
@@ -86,6 +87,17 @@ be **opponent-adjusted** already; `ga_adj` is a penalty.
 `host_boost, crowd_advantage, travel_km_a, travel_km_b, rest_days_a,
 rest_days_b, heat_disadvantage_a, timezone_shift_a, timezone_shift_b`. All from
 team A's perspective; coefficients are configurable in `config/ensemble.yaml`.
+
+**match_context.csv** (`match_context`, keyed by `match_id` or team pair):
+late-breaking evidence that adjusts an existing forecast rather than creating
+one. Rows require timezone-aware `available_at` and `kickoff_at`; information
+available at or after kickoff is rejected. Signed team-A edges are separated
+into `lineup_edge`, `availability_edge`, `goalkeeper_edge`, `fatigue_edge`,
+`match_quality_edge`, `tactical_edge`, and `climate_edge`, with a required
+reason whenever evidence is present. Components and their total are capped.
+The signal is anchored to historical/market odds and has a hard probability
+shift cap. It is used only by `context_challenger` until chronological ablation
+shows improved log loss, Brier score, and calibration.
 
 **expert_predictions.csv** (`expert`, keyed by `match_id`, multiple rows
 allowed): `source_model, team_a_win_prob, draw_prob, team_b_win_prob,

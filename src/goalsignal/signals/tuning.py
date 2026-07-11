@@ -32,6 +32,7 @@ SIGNAL_ORDER = (
     "recent_form",
     "expert",
     "venue_context",
+    "match_context",
 )
 
 
@@ -52,9 +53,7 @@ class TuningResult:
 
 def _row_arrays(signals: dict) -> dict[str, np.ndarray]:
     return {
-        name: probs.as_array()
-        for name, probs in signals.items()
-        if isinstance(probs, OutcomeProbs)
+        name: probs.as_array() for name, probs in signals.items() if isinstance(probs, OutcomeProbs)
     }
 
 
@@ -101,9 +100,7 @@ def tune_weights(
 
     n = len(labels)
     coverage = {name: sum(name in r for r in rows) / max(n, 1) for name in present}
-    non_hist_cov = max(
-        (c for name, c in coverage.items() if name != "historical"), default=0.0
-    )
+    non_hist_cov = max((c for name, c in coverage.items() if name != "historical"), default=0.0)
     low_coverage = n < 100 or non_hist_cov < 0.1
     warning = None
     if low_coverage:
@@ -133,9 +130,7 @@ def tune_weights(
     tuned = dict(zip(present, (float(x) for x in w), strict=True))
 
     tuned_probs = _blend_table(tuned, rows)
-    base_probs = _blend_table(
-        {n: cfg.default_weights.get(n, 0.0) for n in present}, rows
-    )
+    base_probs = _blend_table({n: cfg.default_weights.get(n, 0.0) for n in present}, rows)
 
     def _metrics(probs: np.ndarray) -> dict[str, float]:
         return {
@@ -218,8 +213,7 @@ def write_tuning_report(
     ]
     for name in result.signals_present:
         lines.append(
-            f"| {name} | {result.weights[name]:.3f} | "
-            f"{result.coverage.get(name, 0.0):.1%} |"
+            f"| {name} | {result.weights[name]:.3f} | {result.coverage.get(name, 0.0):.1%} |"
         )
     lines += [
         "",

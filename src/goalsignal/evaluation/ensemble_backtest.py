@@ -217,9 +217,9 @@ def assess_ensemble(comparison: pd.DataFrame, coverage: pd.DataFrame) -> dict:
     base = by_version.get("baseline_historical")
     full = by_version.get("final_ensemble")
     experimental = coverage[coverage["status"] == "experimental"]["signal"].tolist()
-    trusted = coverage[
-        (coverage["status"] == "trusted") & (coverage["signal"] != "historical")
-    ]["signal"].tolist()
+    trusted = coverage[(coverage["status"] == "trusted") & (coverage["signal"] != "historical")][
+        "signal"
+    ].tolist()
 
     assessment = {
         "have_both": base is not None and full is not None,
@@ -232,9 +232,7 @@ def assess_ensemble(comparison: pd.DataFrame, coverage: pd.DataFrame) -> dict:
         return assessment
 
     # Did anything beyond the historical signal actually contribute?
-    non_hist_coverage = coverage[
-        coverage["signal"] != "historical"
-    ]["coverage_rate"].max()
+    non_hist_coverage = coverage[coverage["signal"] != "historical"]["coverage_rate"].max()
     assessment.update(
         {
             "logloss_baseline": base["log_loss"],
@@ -297,8 +295,7 @@ def _summary_markdown(
             f"(delta {a['brier_delta']}) — {'better' if a['brier_better'] else 'not better'}",
             f"- **Calibration (ECE):** baseline {a['ece_baseline']} vs final "
             f"{a['ece_final']} — {'better' if a['calibration_better'] else 'not better'}",
-            f"- **Max non-historical signal coverage:** "
-            f"{a['max_non_historical_coverage']:.1%}",
+            f"- **Max non-historical signal coverage:** {a['max_non_historical_coverage']:.1%}",
             f"- **High-disagreement matches worse?** "
             f"{'yes' if a['high_disagreement_worse'] else 'no'}",
             "",
@@ -368,9 +365,16 @@ ABLATIONS: dict[str, list[str]] = {
     "historical+market": ["historical", "market"],
     "historical+squad_form": ["historical", "squad_strength", "recent_form"],
     "historical+venue": ["historical", "venue_context"],
+    "historical+match_context": ["historical", "match_context"],
     "historical+expert": ["historical", "expert"],
     "full_ensemble": [
-        "historical", "market", "squad_strength", "recent_form", "expert", "venue_context"
+        "historical",
+        "market",
+        "squad_strength",
+        "recent_form",
+        "expert",
+        "venue_context",
+        "match_context",
     ],
 }
 
@@ -442,9 +446,7 @@ def write_ablation(
     lines = ["# Ensemble ablation summary", ""]
     if smoke:
         lines += ["> **SMOKE TEST** — sample data; deltas are not evidence.", ""]
-    improving = (
-        df[df.get("improves", False)]["signals"].tolist() if "improves" in df else []
-    )
+    improving = df[df.get("improves", False)]["signals"].tolist() if "improves" in df else []
     lines += [
         "Each row is the historical model plus one signal group "
         "(negative delta = improvement over historical-only).",

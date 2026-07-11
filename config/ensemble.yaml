@@ -13,6 +13,7 @@
 #   recent_form     — opponent-adjusted recent form
 #   expert          — LLM/expert consensus
 #   venue_context   — host/travel/rest/climate context
+#   match_context   — timestamped lineup/availability/GK/fatigue/quality/tactics
 #   knockout_upset  — knockout-only "survive and advance" adjustment (opt-in)
 #
 # knockout_upset is produced ONLY for knockout matches and ONLY when the caller
@@ -62,6 +63,16 @@ model_versions:
     venue_context: 0.05
     expert: 0.07
     knockout_upset: 0.05
+  # Opt-in late-information challenger. Its context signal is anchored to the
+  # base forecast, timestamp-validated and capped; evaluate before promotion.
+  context_challenger:
+    historical: 0.35
+    market: 0.25
+    squad_strength: 0.10
+    recent_form: 0.08
+    expert: 0.05
+    venue_context: 0.05
+    match_context: 0.12
 
 # Parameters for the adjustment-style signals (squad/form/venue), which convert
 # a scalar strength edge into a W/D/L distribution via the Davidson map.
@@ -74,6 +85,11 @@ signal_params:
     travel_per_1000km: 8.0
     rest_per_day: 6.0
     timezone_per_hour: 3.0
+  match_context:
+    points_scale: 400.0
+    component_cap: 25.0
+    total_cap: 60.0
+    max_probability_shift: 0.12
   # Knockout "survive and advance" coefficients. All modest and bounded; the
   # adjustment is anchored so no style/penalty evidence => exactly no change, and
   # the per-match advance shift is hard-capped by max_advance_shift.

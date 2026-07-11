@@ -9,7 +9,7 @@ advance probabilities for knockout matches via the closed-form tiebreak.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pandas as pd
@@ -31,6 +31,12 @@ from goalsignal.signals.knockout_upset import (
     load_team_styles,
 )
 from goalsignal.signals.market import load_market_odds
+from goalsignal.signals.match_context import (
+    MatchContextParams,
+    adjust_advance,
+    adjust_outcome,
+    load_match_context,
+)
 from goalsignal.signals.meta_ensemble import (
     BlendResult,
     EnsembleConfig,
@@ -51,6 +57,7 @@ SIGNAL_NAMES = (
     "recent_form",
     "expert",
     "venue_context",
+    "match_context",
     "knockout_upset",
 )
 
@@ -62,6 +69,7 @@ _FILES = {
     "squad_strength": "squad_strength",
     "recent_form": "recent_form",
     "venue_context": "venue_context",
+    "match_context": "match_context",
     "expert": "expert_predictions",
     "team_styles": "team_styles",
     "penalties": "penalties",
@@ -79,10 +87,7 @@ def _is_pair_key(key: str) -> bool:
 
 def _market_index(market: dict) -> PairIndex:
     return PairIndex.build(
-        [
-            (None if _is_pair_key(k) else k, q.team_a, q.team_b, q)
-            for k, q in market.items()
-        ]
+        [(None if _is_pair_key(k) else k, q.team_a, q.team_b, q) for k, q in market.items()]
     )
 
 
@@ -96,10 +101,13 @@ def _expert_index(expert: dict) -> PairIndex:
 
 def _venue_index(venue: dict) -> PairIndex:
     return PairIndex.build(
-        [
-            (None if _is_pair_key(k) else k, c.team_a, c.team_b, c)
-            for k, c in venue.items()
-        ]
+        [(None if _is_pair_key(k) else k, c.team_a, c.team_b, c) for k, c in venue.items()]
+    )
+
+
+def _context_index(context: dict) -> PairIndex:
+    return PairIndex.build(
+        [(None if _is_pair_key(k) else k, c.team_a, c.team_b, c) for k, c in context.items()]
     )
 
 
@@ -123,6 +131,8 @@ class ManualInputs:
     venue_index: PairIndex
     styles: TeamStyleTable
     penalties: PenaltyTable
+    context: dict = field(default_factory=dict)
+    context_index: PairIndex = field(default_factory=lambda: PairIndex(by_match={}, by_pair={}))
     include_knockout_upset: bool = False
 
     @property
@@ -136,9 +146,11 @@ class ManualInputs:
 
     @property
     def knockout_upset_params(self) -> KnockoutUpsetParams:
-        return KnockoutUpsetParams.from_mapping(
-            self.config.signal_params.get("knockout_upset")
-        )
+        return KnockoutUpsetParams.from_mapping(self.config.signal_params.get("knockout_upset"))
+
+    @property
+    def match_context_params(self) -> MatchContextParams:
+        return MatchContextParams.from_mapping(self.config.signal_params.get("match_context"))
 
 
 def load_manual_inputs(
@@ -163,9 +175,8 @@ def load_manual_inputs(
     squad = load_squad_strength(_resolve_manual_file(d, _FILES["squad_strength"]))
     form = load_recent_form(_resolve_manual_file(d, _FILES["recent_form"]))
     venue = load_venue_context(_resolve_manual_file(d, _FILES["venue_context"]))
-    expert = load_expert_predictions(
-        _resolve_manual_file(d, _FILES["expert"]), on_error=expert_err
-    )
+    context = load_match_context(_resolve_manual_file(d, _FILES["match_context"]))
+    expert = load_expert_predictions(_resolve_manual_file(d, _FILES["expert"]), on_error=expert_err)
     styles = load_team_styles(_resolve_manual_file(d, _FILES["team_styles"]))
     penalties = load_penalties(_resolve_manual_file(d, _FILES["penalties"]))
     if market_err:
@@ -178,11 +189,13 @@ def load_manual_inputs(
         squad=squad,
         form=form,
         venue=venue,
+        context=context,
         expert=expert,
         load_errors=errors,
         market_index=_market_index(market),
         expert_index=_expert_index(expert),
         venue_index=_venue_index(venue),
+        context_index=_context_index(context),
         styles=styles,
         penalties=penalties,
         include_knockout_upset=include_knockout_upset,
@@ -276,12 +289,20 @@ def build_signals(
         return advance_from_outcome(outcome, a_tiebreak_prob=a_tb) if ko else outcome
 
     squad = squad_signal(
-        inputs.squad, spec.team_a, spec.team_b,
-        points_per_z=float(params.get("squad_points_per_z", 60.0)), scale=scale, nu=nu,
+        inputs.squad,
+        spec.team_a,
+        spec.team_b,
+        points_per_z=float(params.get("squad_points_per_z", 60.0)),
+        scale=scale,
+        nu=nu,
     )
     form = form_signal(
-        inputs.form, spec.team_a, spec.team_b,
-        points_per_z=float(params.get("form_points_per_z", 40.0)), scale=scale, nu=nu,
+        inputs.form,
+        spec.team_a,
+        spec.team_b,
+        points_per_z=float(params.get("form_points_per_z", 40.0)),
+        scale=scale,
+        nu=nu,
     )
 
     # Market (directional: flip W/D/L or A/B advance for a reverse match).
@@ -301,8 +322,9 @@ def build_signals(
     venue = None
     if ctx is not None and ctx.has_any():
         venue = as_mode(
-            davidson_outcome(ctx.advantage_points(inputs.venue_coeffs) * v_orient,
-                             scale=scale, nu=nu)
+            davidson_outcome(
+                ctx.advantage_points(inputs.venue_coeffs) * v_orient, scale=scale, nu=nu
+            )
         )
 
     signals: dict[str, OutcomeProbs | AdvanceProbs | None] = {
@@ -313,6 +335,29 @@ def build_signals(
         "venue_context": venue,
         "expert": expert,
     }
+
+    # Structured late context is anchored to the best available forecast and
+    # shifts it only by a bounded amount. Reverse pair matches negate the edge.
+    context, c_orient = inputs.context_index.resolve(spec.match_id, spec.team_a, spec.team_b)
+    context_signal = None
+    if context is not None and context.has_evidence():
+        points = context.advantage_points(inputs.match_context_params) * c_orient
+        if ko:
+            context_signal = adjust_advance(
+                _base_advance(spec, signals), points, inputs.match_context_params
+            )
+        else:
+            base_outcome = next(
+                (
+                    p
+                    for p in (signals.get("historical"), signals.get("market"))
+                    if isinstance(p, OutcomeProbs)
+                ),
+                None,
+            )
+            if base_outcome is not None:
+                context_signal = adjust_outcome(base_outcome, points, inputs.match_context_params)
+    signals["match_context"] = context_signal
 
     # Knockout-only survival adjustment (opt-in). Anchored to the best available
     # advance estimate so it never randomly boosts underdogs.
