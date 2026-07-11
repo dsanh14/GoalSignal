@@ -15,6 +15,7 @@ directory is required by the base statistical pipeline.
 | `squad_strength.csv` | `squad_strength` | `team` | any subset of value/minutes/depth indicators |
 | `recent_form.csv` | `recent_form` | `team` | **opponent-adjusted** form, not raw results |
 | `venue_context.csv` | `venue_context` | `match_id` | host/travel/rest/climate, all per-match |
+| `match_context.csv` | `match_context` | `match_id` or team pair | timestamped, bounded lineup/availability/GK/fatigue/match-quality/tactical/climate edges; used by `context_challenger` |
 | `expert_predictions.csv` | `expert` | `match_id` | structured LLM/expert probabilities + reasoning |
 | `team_styles.csv` | `knockout_upset` | `team` | 0-100 style indicators (low block, sterile possession, transition, set pieces…) |
 | `penalties.csv` | `knockout_upset` | `team` | penalty/keeper ratings + shootout records (shrunk toward 50/50) |
@@ -39,6 +40,15 @@ knockout ties (`match_id, stage, team_a, team_b` + optional
 tags. It refuses to overwrite without `--force` and re-runs are idempotent.
 Do not pass `--tags` to `human-adjust` when using a YAML regenerated from the
 same tags — the evidence would count twice.
+
+`match_context.csv` is for information known shortly before kickoff. Every row
+must include timezone-aware `available_at` and `kickoff_at` timestamps; rows
+available at or after kickoff are rejected. Numeric fields are signed Elo-like
+points from team A's perspective and are independently capped before a total
+cap. Keep goalkeeping errors separate from general team performance, and use
+`match_quality_edge` for process evidence (xG/big chances), not raw possession.
+Run it with ensemble version `context_challenger`; it remains opt-in until a
+chronological ablation shows an out-of-sample calibration gain.
 
 Validate coverage at any time with:
 

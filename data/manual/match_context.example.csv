@@ -1,0 +1,2 @@
+match_id,team_a,team_b,stage,available_at,kickoff_at,source,lineup_edge,availability_edge,goalkeeper_edge,fatigue_edge,match_quality_edge,tactical_edge,climate_edge,reason
+M99,Norway,England,knockout,2026-07-11T17:00:00-04:00,2026-07-11T20:00:00-04:00,confirmed-lineup,,,,,,,,Example only - populate each edge from evidence available before kickoff
