@@ -141,6 +141,16 @@ R16_PRIORITY: dict[int, PriorityMatch] = {
                 "Mexico City altitude and home crowd.",
                 confidence="high",
             ),
+            PriorityAdjustment(
+                "Mexico",
+                "venue",
+                "home_host_boost",
+                3,
+                "Unbeaten (3-0) at Estadio Azteca this tournament; kickoff confirmed "
+                "for its original 6pm local/8pm ET slot despite storm-related rumors "
+                "of a move to noon.",
+                confidence="medium",
+            ),
         ),
     ),
     93: PriorityMatch(

@@ -100,8 +100,9 @@ matches:
       category: venue
       points: 3
       confidence: medium
-      reason: Noon kickoff after the storm-related schedule change increases the Mexico City heat/altitude stress on England.
-      modifier: altitude_boost
+      reason: Unbeaten (3-0) at Estadio Azteca this tournament; kickoff confirmed for its
+        original 6pm local/8pm ET slot despite storm-related rumors of a move to noon.
+      modifier: home_host_boost
   93:
     label: Portugal vs Spain
     adjustments:
@@ -151,29 +152,29 @@ matches:
       reason: Home crowd and venue familiarity.
       modifier: home_host_boost
   95:
-    label: 'Argentina vs Egypt (provisional: Argentina pending feeder result)'
+    label: Argentina vs Egypt
     adjustments:
     - team: Argentina
-      category: opponent_quality
-      points: -4.0
+      category: tournament_form
+      points: -2.0
       confidence: medium
-      reason: '[not_tested M86] If Argentina beat Cape Verde comfortably, easy path continues
-        (provisional; M86 not confirmed)'
-      modifier: easy_path_penalty
+      reason: '[extra_time_fatigue M86] Played 120 minutes against Cabo Verde, needing a late
+        own goal to escape a shock exit'
+      modifier: extra_time_fatigue_penalty
     - team: Egypt
       category: tournament_form
       points: 3.0
       confidence: medium
-      reason: '[penalty_win M88] Advanced on penalties 4-2 over Australia'
+      reason: '[penalty_win M88] Advanced on penalties 4-2 over New Zealand'
       modifier: penalty_survival_boost
     - team: Egypt
       category: tournament_form
       points: -2.0
       confidence: medium
-      reason: '[extra_time_fatigue M88] Played 120 minutes plus a shootout against Australia'
+      reason: '[extra_time_fatigue M88] Played 120 minutes plus a shootout against New Zealand'
       modifier: extra_time_fatigue_penalty
   96:
-    label: 'Switzerland vs Colombia (provisional: Colombia pending feeder result)'
+    label: Switzerland vs Colombia
     adjustments:
     - team: Switzerland
       category: tournament_form
@@ -182,12 +183,11 @@ matches:
       reason: '[dominant_win M85] Clean 2-0 win over Algeria'
       modifier: dominant_win_boost
     - team: Colombia
-      category: opponent_quality
-      points: 5.0
+      category: tournament_form
+      points: 1.0
       confidence: medium
-      reason: '[battle_tested M87] Battle-tested if they advance past Ghana (provisional;
-        M87 not confirmed)'
-      modifier: battle_tested_boost
+      reason: '[narrow_win M87] Edged Ghana 1-0 on an early goal; couldn''t add a second and
+        let the game stay open'
   97:
     label: France vs Morocco
     adjustments:
