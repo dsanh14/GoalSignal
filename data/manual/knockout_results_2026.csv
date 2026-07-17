@@ -25,3 +25,5 @@ match_number,round,team_a,team_b,score_a,score_b,aet,penalties,winner,notes
 98,quarterfinal,Spain,Belgium,2,1,false,false,Spain,"Spain advanced; one goal came from a Courtois error, but he later kept Belgium close before injury"
 99,quarterfinal,Norway,England,1,2,true,false,England,"England won after extra time; Bellingham scored at 45+2 and 93, Norway pushed them hard in Miami"
 100,quarterfinal,Argentina,Switzerland,3,1,true,false,Argentina,"Argentina won after extra time; Switzerland had a red card, Argentina led the stats but were pushed to 120 minutes"
+101,semifinal,France,Spain,0,2,false,false,Spain,"Spain were dominant, controlled the match, and neutralized France's attack in a 2-0 semifinal win"
+102,semifinal,England,Argentina,1,2,false,false,Argentina,"England were the better side early and led at 55', but parked the bus too soon; Argentina sustained pressure and punished the retreat with goals at 85' and 90+2'"

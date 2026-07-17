@@ -107,7 +107,7 @@ def test_repository_default_results_file_is_valid():
     assert results, "tracked knockout_results_2026.csv should not be empty"
     for result in results.values():
         assert isinstance(result, KnockoutResult)
-        assert result.round in {"round_of_32", "round_of_16", "quarterfinal"}
+        assert result.round in {"round_of_32", "round_of_16", "quarterfinal", "semifinal"}
         assert 73 <= result.match_number <= 104
     # Penalty wins recorded with score semantics (level after ET).
     penalty_winners = {
@@ -115,3 +115,4 @@ def test_repository_default_results_file_is_valid():
     }
     assert {"Paraguay", "Morocco", "Egypt", "Switzerland"} <= penalty_winners
     assert results[98].winner == "Spain"
+    assert results[101].winner == "Spain"
